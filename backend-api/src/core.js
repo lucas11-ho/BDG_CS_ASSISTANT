@@ -3211,7 +3211,7 @@ async function buildAiKnowledgeCatalog(env, scope, maxCandidates = 500) {
   const limit = Math.max(1, Math.min(500, Number(maxCandidates || 500)));
   const rows = (await q(env, `SELECT * FROM knowledge_items
     WHERE status='active' AND tenant_id=$1::integer AND platform_id=$2::integer
-    ORDER BY priority ASC, updated_at DESC, id DESC
+    ORDER BY priority ASC, created_at DESC, id DESC
     LIMIT $3::integer`, [scope.tenant_id, scope.platform_id, limit])).rows;
   return rows.map(virtualKnowledgeRow);
 }
