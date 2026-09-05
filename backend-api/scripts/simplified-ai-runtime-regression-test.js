@@ -20,11 +20,10 @@ const redirects = [
   '_admin.prompt-history.tsx',
   '_admin.ai-reliability.tsx',
   '_admin.ai-response-quality.tsx',
-  '_admin.ai-knowledge.tsx',
 ].map((file) => read(`admin-pro/src/routes/${file}`));
 
-assert.match(core, /1\.18\.0-luke-commerce-connector-v2/);
-assert.match(server, /1\.18\.0-luke-commerce-connector-v2/);
+assert.match(core, /1\.18\.1-ai-knowledge-runtime/);
+assert.match(server, /1\.18\.1-ai-knowledge-runtime/);
 assert.match(core, /source_order:\['prompt_image'\]/);
 assert.match(core, /enabled_sources:\['prompt_image'\]/);
 assert.match(core, /source_type='prompt_image'/);
@@ -39,7 +38,7 @@ assert.match(core, /retiredAiAdminEndpoint\(path\)/);
 assert.match(server, /assistant-profile-menu-image-runtime/);
 assert.doesNotMatch(server, /ai-response-quality-center|unified-ai-source-router|advanced-knowledge-import/);
 
-for (const route of ['/ai-prompt-manager', '/ai-content-studio', '/ai-diagnostics']) {
+for (const route of ['/ai-prompt-manager', '/ai-knowledge', '/ai-content-studio', '/ai-diagnostics']) {
   assert.match(layout, new RegExp(`(?:key|to): "${route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
 }
 for (const retired of ['/ai-qa', '/ai-source-router', '/ai-response-quality', '/ai-knowledge-import', '/locale-studio']) {
@@ -53,7 +52,7 @@ for (const title of [
 ]) assert.match(assistantSetup, new RegExp(title));
 assert.match(assistantSetup, /Production AI settings/);
 assert.match(assistantSetup, /One DeepSeek call/);
-assert.match(menuImages, /The only approved business-content source/);
+assert.match(menuImages, /Approved menu and media source/);
 assert.match(menuImages, /source_type: "prompt_image"/);
 assert.match(diagnostics, /Retired AI modules/);
 assert.ok(redirects.every((file) => file.includes('throw redirect')));
@@ -66,7 +65,7 @@ assert.match(migration, /source_type\s*=\s*'qa'/i);
 assert.match(migration, /approval_status\s*=\s*'archived'/i);
 
 console.log('PASS Runtime uses one compiled Assistant Setup prompt and one provider stage');
-console.log('PASS Menu & Images is the only approved business-content source');
+console.log('PASS Menu & Images remains the approved media source while AI Knowledge is separate');
 console.log('PASS General prompt answers and automatic Burmese language detection are enabled');
 console.log('PASS Retired AI modules are absent from navigation and blocked by HTTP 410');
 console.log('PASS Migration 037 makes legacy router/Q&A data inert while preserving rollback history');

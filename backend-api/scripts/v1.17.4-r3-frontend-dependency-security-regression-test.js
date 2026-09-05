@@ -8,11 +8,35 @@ const repo = path.resolve(here, '..', '..');
 const checks = [];
 function test(name, fn) { fn(); checks.push(name); console.log(`PASS ${name}`); }
 function readJson(...parts) { return JSON.parse(fs.readFileSync(path.join(repo, ...parts), 'utf8')); }
+function packageVersions(lock, packageName) {
+  const suffix = `/node_modules/${packageName}`;
+  return Object.entries(lock.packages || {})
+    .filter(([packagePath]) => packagePath === `node_modules/${packageName}` || packagePath.endsWith(suffix))
+    .map(([, meta]) => String(meta?.version || ''))
+    .filter(Boolean);
+}
+function versionAtLeast(actual, minimum) {
+  const parse = (value) => String(value).split('-')[0].split('.').map((part) => Number(part) || 0);
+  const a = parse(actual);
+  const b = parse(minimum);
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const av = a[i] || 0;
+    const bv = b[i] || 0;
+    if (av !== bv) return av > bv;
+  }
+  return true;
+}
 const apps = ['admin-pro', 'chat-pro', 'guide-pro', 'staff-pro'];
 
 for (const app of apps) {
   const lock = readJson(app, 'package-lock.json');
-  test(`${app} locks js-yaml at patched 4.3.1`, () => assert.equal(lock.packages['node_modules/js-yaml']?.version, '4.3.1'));
+  test(`${app} has no js-yaml below patched 4.3.1`, () => {
+    const versions = packageVersions(lock, 'js-yaml');
+    assert.ok(
+      versions.every((version) => versionAtLeast(version, '4.3.1')),
+      `Unsafe js-yaml lock entries found: ${versions.join(', ')}`,
+    );
+  });
   test(`${app} locks nanoid at patched 3.3.18`, () => assert.equal(lock.packages['node_modules/nanoid']?.version, '3.3.18'));
 }
 

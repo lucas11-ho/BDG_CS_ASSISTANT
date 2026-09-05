@@ -16,7 +16,7 @@ const chatBridge=read('chat-pro/src/lib/commerce-context.ts');
 const chatApi=read('chat-pro/src/lib/api.ts');
 const chatApp=read('chat-pro/src/App.tsx');
 ok('all current application packages report v1.18.0',['package.json','backend-api/package.json','admin-pro/package.json','chat-pro/package.json','guide-pro/package.json','staff-pro/package.json'].every(f=>JSON.parse(read(f)).version==='1.18.0'));
-ok('runtime markers expose v1.18.0',core.includes('1.18.0-luke-commerce-connector-v2')&&server.includes('1.18.0-luke-commerce-connector-v2'));
+ok('runtime markers expose v1.18.0',core.includes('1.18.1-ai-knowledge-runtime')&&server.includes('1.18.1-ai-knowledge-runtime'));
 ok('migration 048 creates platform-scoped connector and redacted audit tables',migration.includes('platform_commerce_connectors')&&migration.includes('commerce_connector_audit_logs')&&migration.includes('UNIQUE(platform_id)'));
 ok('connector tool allowlist is read-only',connector.includes("'customer.get'")&&connector.includes("'orders.list'")&&connector.includes("'order.status'")&&connector.includes("'payment.status'")&&connector.includes("'delivery.status'")&&!connector.includes("'order.cancel'")&&!connector.includes("'refund.create'"));
 ok('Shop credential is exchanged for a short-lived service token',connector.includes('/v1/customer-service/auth/token')&&connector.includes('access_token')&&connector.includes('expires_in'));

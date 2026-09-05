@@ -40,7 +40,7 @@ const chatApp = read("chat-pro/src/App.tsx");
 const chatConfig = read("chat-pro/src/lib/chat-config.ts");
 const plainTextAi = read("backend-api/src/plain-text-ai.js");
 
-expect("Backend and server retain the SSE delivery runtime on the current release", core.includes("1.18.0-luke-commerce-connector-v2") && server.includes("1.18.0-luke-commerce-connector-v2"));
+expect("Backend and server retain the SSE delivery runtime on the current release", core.includes("1.18.1-ai-knowledge-runtime") && server.includes("1.18.1-ai-knowledge-runtime"));
 expect("Domain route IDs are extracted from the numeric path segment", core.includes("function domainIdFromPath") && core.includes("Number.isSafeInteger(id)") && core.includes("DOMAIN_ID_INVALID"));
 expect("Provision uses the validated domain ID", core.includes("provisionMappedDomain(env, domainIdFromPath(path), scope)") && !core.includes("provisionMappedDomain(env, idFromParts(path, 3), scope)"));
 expect("Sync, verify, and delete use the validated domain ID", ["syncMappedDomain(env, domainIdFromPath(path), scope)", "verifyMappedDomain(env, domainIdFromPath(path), scope)", "deleteMappedDomain(env, domainIdFromPath(path), scope)"].every((item) => core.includes(item)));
@@ -51,7 +51,7 @@ expect("Domain mapping exposes missing configuration names", core.includes("cons
 expect("Render environment validation covers Cloudflare prerequisites", env.includes("CLOUDFLARE_CUSTOM_HOSTNAMES_ENABLED") && env.includes("CLOUDFLARE_API_TOKEN") && env.includes("CLOUDFLARE_ZONE_ID") && env.includes("CLOUDFLARE_SAAS_CNAME_TARGET"));
 expect("Admin disables Provision until Cloudflare is configured", domainPage.includes("const cloudflareReady = data?.cloudflare?.configured === true") && domainPage.includes("disabled={!cloudflareReady}"));
 expect("Admin displays the exact missing Render variables", domainPage.includes("data?.cloudflare?.missing_env") && domainPage.includes("Configure these Render variables only when you need client-owned custom domains"));
-expect("Admin release marker is v1.18.0", adminLayout.includes('const ADMIN_VERSION = "v1.18.0"'));
+expect("Admin release marker is v1.18.0", adminLayout.includes('const ADMIN_VERSION = "v1.18.1"'));
 expect("v1.14.1 single-image contract remains present", core.includes("const legacyContentImages = imageDelivery.image_count ? [] : contentImages") && core.includes("A response without procedural steps has one canonical visual at most"));
 expect("Platform context remains strict with no fallback", core.includes("PLATFORM_CONTEXT_REQUIRED") && core.includes("fallback_applied: false") && !core.includes("publicReference || 'default'"));
 expect("v1.14.3 migration repairs existing parent Guide drafts", publishingMigration.includes("UPDATE guides g") && publishingMigration.includes("gt.status = 'published'"));
@@ -84,7 +84,7 @@ expect("Current DeepSeek model replaces retired defaults", env.includes("deepsee
 expect("Assistant Setup owns production provider and memory controls", adminApi.includes("getAiSettings") && adminApi.includes("updateAiSettings") && promptManagerPage.includes("Production AI settings") && promptManagerPage.includes("One DeepSeek call") && promptManagerPage.includes("Save production settings"));
 expect("Admin reliability test calls the real provider safely", core.includes("This is a provider connectivity test") && core.includes("provider_http_status") && core.includes("API key configured"));
 expect("Only approved Menu & Images are loaded into the live catalog", core.includes("async function buildPromptImageCatalog") && core.includes("source_type='prompt_image'") && core.includes("approval_status='approved'") && core.includes("status='published'"));
-expect("General questions remain allowed when no approved menu matches", core.includes("general_prompt_answers_allowed:true") && plainTextAi.includes("No approved Menu & Images item matched this message. Answer from the Assistant Setup") && core.includes("require_approved_context:false"));
+expect("General questions remain allowed when no approved menu matches", core.includes("general_prompt_answers_allowed:true") && plainTextAi.includes("No approved AI Knowledge or Menu & Images item matched this message. Answer from the Assistant Setup") && core.includes("require_approved_context:false"));
 expect("Locale routing can use the platform default without crossing tenants", core.includes("exact_then_default") && core.includes("defaultLocale = normalizeLocale(scope.default_locale") && reliabilityMigration.includes("locale_strategy='exact_then_default'"));
 expect("Customer responses never expose raw provider failures", !core.includes("provider_error: usedDeepSeek") && plainTextAi.includes("The response is taking longer than expected") && core.includes("provider_failure_retry_exhausted") && chatApp.includes("AsyncProcessingIndicator"));
 expect("Chat has Indonesian, Chinese, Burmese, Hindi, and English safety copy", ["id:","zh:","my:","hi:","en:"].every((token) => chatConfig.includes(token)) && chatConfig.includes("Layanan sedang mengalami gangguan"));
@@ -101,7 +101,7 @@ expect("Prompt Manager previews the exact active runtime and compiler warnings",
 expect("Chat Logs expose prompt version, hash, sections, and memory reset", chatLogsPage.includes("Prompt runtime:") && chatLogsPage.includes("Compiled Prompt SHA-256") && chatLogsPage.includes("memory_reset_reason"));
 expect("Integration tests distinguish shared Pages origins from custom hostnames", integrationTest.includes("SHARED_CHAT_ORIGIN") && integrationTest.includes("Read public FAQs through the shared Chat hostname") && integrationTest.includes("Reject a route that does not match the custom hostname") && !integrationTest.includes("SKIP_CLOUDFLARE_PLATFORM_CHECK"));
 expect("Integration locale fixture uses the schema tenant-platform-locale key", integrationTest.includes("ON CONFLICT(tenant_id,platform_id,locale)") && !integrationTest.includes("ON CONFLICT(platform_id,locale)"));
-expect("Admin UI exposes only the simplified production AI workflow", adminLayout.includes("Assistant Setup") && adminLayout.includes("Menu & Images") && adminLayout.includes("Test & Diagnostics") && menuImagesPage.includes("The only approved business-content source") && promptManagerPage.includes("STANDARD_SECTIONS"));
+expect("Admin UI exposes only the simplified production AI workflow", adminLayout.includes("Assistant Setup") && adminLayout.includes("AI Knowledge") && adminLayout.includes("Menu & Images") && adminLayout.includes("Test & Diagnostics") && menuImagesPage.includes("Approved menu and media source") && promptManagerPage.includes("STANDARD_SECTIONS"));
 
 for (const check of checks) console.log(`${check.ok ? "PASS" : "FAIL"} ${check.name}`);
 const failed = checks.filter((check) => !check.ok);

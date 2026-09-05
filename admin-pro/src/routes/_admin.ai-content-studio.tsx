@@ -237,8 +237,8 @@ function AiContentStudioPage() {
       <Alert
         showIcon
         type="success"
-        message="The only approved business-content source"
-        description="Create real menu items, prices, availability, delivery conditions, payment methods, examples, approved images, and optional buttons here. Draft or unapproved items are never sent to the live assistant."
+        message="Approved menu and media source"
+        description="Create menu-specific facts, approved images, and optional buttons here. General assistant knowledge belongs in AI Knowledge. Draft or unapproved menu items are never sent to the live assistant."
         style={{ marginBottom: 12 }}
       />
 

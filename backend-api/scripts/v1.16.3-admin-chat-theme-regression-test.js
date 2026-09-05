@@ -12,7 +12,7 @@ const nav=read("admin-pro/src/components/AdminLayout.tsx");
 const migration=read("backend-api/migrations/041_v1.16.3_admin_chat_theme_and_queue_guard.sql");
 const tests=[];
 const test=(n,c)=>{assert.ok(c,n);tests.push(n);console.log("PASS",n)};
-test("v1.16.3 release marker",core.includes("1.18.0-luke-commerce-connector-v2"));
+test("v1.16.3 release marker",core.includes("1.18.1-ai-knowledge-runtime"));
 test("stable Admin platform context is used",api.includes("getPlatformContext")&&!buttons.includes("listSupportPlatforms")&&!menu.includes("listSupportPlatforms"));
 test("Menu and Buttons own routes remain independent",menu.includes('api.list("ai-content")')&&buttons.includes('api.list("action-buttons")'));
 test("one active AI job is database enforced",migration.includes("uq_ai_jobs_one_active_per_conversation"));

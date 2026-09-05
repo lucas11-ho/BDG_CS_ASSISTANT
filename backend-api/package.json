@@ -39,7 +39,8 @@
     "test:v1174r3": "node scripts/v1.17.4-r3-frontend-dependency-security-regression-test.js",
     "test:v1174r4": "node scripts/v1.17.4-r4-ant-design-v6-type-compatibility-regression-test.js",
     "test:commerce": "node scripts/commerce-connector-v2-regression-test.js",
-    "test:v1180r1": "node scripts/v1.18.0-r1-nanoid-security-hotfix-regression-test.js"
+    "test:v1180r1": "node scripts/v1.18.0-r1-nanoid-security-hotfix-regression-test.js",
+    "test:v1181-ai-knowledge": "node scripts/v1.18.1-ai-knowledge-regression-test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1085.0",

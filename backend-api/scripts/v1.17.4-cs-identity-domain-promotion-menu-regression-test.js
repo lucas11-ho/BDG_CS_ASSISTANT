@@ -25,9 +25,9 @@ const allCurrent=[core,server,env,support,staffApp,staffApi,chatApp,chatApi,admi
 
 const checks=[];
 const check=(name,ok)=>checks.push([name,Boolean(ok)]);
-check('v1.17.4 features remain active on v1.18.0 runtime',core.includes('1.18.0-luke-commerce-connector-v2')&&server.includes('1.18.0-luke-commerce-connector-v2'));
+check('v1.17.4 features remain active on v1.18.0 runtime',core.includes('1.18.1-ai-knowledge-runtime')&&server.includes('1.18.1-ai-knowledge-runtime'));
 check('all application packages report current 1.18.0',['package.json','backend-api/package.json','admin-pro/package.json','chat-pro/package.json','guide-pro/package.json','staff-pro/package.json'].every((f)=>json(f).version==='1.18.0'));
-check('Admin displays current v1.18.0',adminLayout.includes('const ADMIN_VERSION = "v1.18.0"'));
+check('Admin displays current v1.18.1',adminLayout.includes('const ADMIN_VERSION = "v1.18.1"'));
 check('migration 047 is present and records the release',migration.includes('v1.17.4_cs_identity_domain_promotion_menu_upgrade'));
 check('migration 047 adds separate internal profile avatar',migration.includes('profile_avatar_url TEXT'));
 check('migration 047 adds staff self-profile policy',migration.includes('staff_profile_edit_enabled')&&migration.includes('staff_public_identity_edit_enabled'));
