@@ -1,0 +1,61 @@
+name: AI Knowledge Bootstrap
+
+on:
+  push:
+    branches:
+      - feature/v1.18.1-ai-knowledge
+    paths:
+      - .github/workflows/ai-knowledge-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build-ai-knowledge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/v1.18.1-ai-knowledge
+          fetch-depth: 0
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend-api/package-lock.json
+            admin-pro/package-lock.json
+
+      - name: Apply AI Knowledge patch
+        run: node apply-ai-knowledge-v1.18.1.mjs
+
+      - name: Validate backend
+        run: |
+          npm --prefix backend-api ci --omit=dev --no-audit --no-fund --registry=https://registry.npmjs.org/
+          npm --prefix backend-api run check
+          npm --prefix backend-api run test:prompt-runtime
+          npm --prefix backend-api run test:simplified-ai
+          npm --prefix backend-api run test:v1181-ai-knowledge
+
+      - name: Validate Admin
+        run: |
+          npm --prefix admin-pro ci --no-audit --no-fund --registry=https://registry.npmjs.org/
+          npm --prefix admin-pro run typecheck
+          npm --prefix admin-pro run build
+
+      - name: Validate diff
+        run: git diff --check
+
+      - name: Commit verified implementation
+        run: |
+          git config user.name "ChatGPT Build Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/ai-knowledge-bootstrap.yml
+          git rm -f START-AI-KNOWLEDGE-V1.18.1.bat VERIFY-AI-KNOWLEDGE-V1.18.1.bat apply-ai-knowledge-v1.18.1.mjs README-FIRST.txt || true
+          git add backend-api/src/core.js backend-api/src/server.js backend-api/src/package.json backend-api/scripts/v1.18.1-ai-knowledge-regression-test.js admin-pro/src/routes/_admin.ai-knowledge.tsx admin-pro/src/components/AdminLayout.tsx .github/workflows/ci.yml .github/workflows/bdg-production-release.yml AI_KNOWLEDGE_V1.18.1.md
+          git commit -m "v1.18.1: add scoped AI Knowledge runtime"
+          git push origin HEAD:feature/v1.18.1-ai-knowledge
