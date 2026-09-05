@@ -143,7 +143,7 @@ jobs:
 
       - name: Build and publish Admin production
         run: |
-          npm --prefix admin-pro ci --no-audit --no-fund --registry=https://registry.npmjs.org/
+          npm --prefix admin-pro ci --legacy-peer-deps --no-audit --no-fund --registry=https://registry.npmjs.org/
           npm --prefix admin-pro run test:customer-service-route
           npm --prefix admin-pro run typecheck
           VITE_API_BASE_URL="$BDG_API_BASE_URL" VITE_MOCK_MODE=false npm --prefix admin-pro run build
