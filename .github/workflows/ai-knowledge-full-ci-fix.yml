@@ -45,10 +45,19 @@ jobs:
         with:
           node-version: 22.18.0
 
-      - name: Align remaining Admin version contract
+      - name: Align schema and remaining regression contracts
         run: |
           python - <<'PY'
           from pathlib import Path
+
+          core = Path('backend-api/src/core.js')
+          text = core.read_text(encoding='utf-8')
+          old = "ORDER BY priority ASC, updated_at DESC, id DESC\n    LIMIT $3::integer"
+          new = "ORDER BY priority ASC, created_at DESC, id DESC\n    LIMIT $3::integer"
+          if old not in text:
+              raise SystemExit('AI Knowledge catalog ordering marker not found')
+          core.write_text(text.replace(old, new, 1), encoding='utf-8')
+
           changed=[]
           for path in Path('backend-api/scripts').glob('*.js'):
               text=path.read_text(encoding='utf-8')
@@ -56,7 +65,7 @@ jobs:
               if updated != text:
                   path.write_text(updated, encoding='utf-8')
                   changed.append(str(path))
-          print('Updated:', changed)
+          print('Updated regression files:', changed)
           PY
 
       - name: Install backend
@@ -64,6 +73,7 @@ jobs:
 
       - name: Run remaining backend gates
         run: |
+          npm --prefix backend-api run check
           npm --prefix backend-api run test:v1173
           npm --prefix backend-api run test:v1174
           npm --prefix backend-api run test:v1174r1
@@ -79,14 +89,10 @@ jobs:
           npm --prefix backend-api run test:integration
           npm --prefix backend-api audit --audit-level=high
 
-      - name: Commit compatibility fix
+      - name: Commit verified schema compatibility fix
         run: |
           git config user.name "ChatGPT Build Bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend-api/scripts
-          if git diff --cached --quiet; then
-            echo "No compatibility changes to commit"
-          else
-            git commit -m "test: align remaining regressions with v1.18.1"
-            git push origin HEAD:feature/v1.18.1-ai-knowledge
-          fi
+          git add backend-api/src/core.js backend-api/scripts/v1.17.3-support-workspace-ux-regression-test.js
+          git commit -m "fix: align AI Knowledge retrieval with existing schema"
+          git push origin HEAD:feature/v1.18.1-ai-knowledge
