@@ -33,7 +33,7 @@ jobs:
       - name: Apply AI Knowledge patch
         run: node apply-ai-knowledge-v1.18.1.mjs
 
-      - name: Align current-runtime regression markers
+      - name: Align runtime contracts and labels
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -48,13 +48,53 @@ jobs:
                   if not path.is_file() or path.suffix not in {'.js', '.mjs', '.cjs'}:
                       continue
                   text = path.read_text(encoding='utf-8')
-                  if old not in text:
-                      continue
-                  path.write_text(text.replace(old, new), encoding='utf-8')
-                  changed.append(str(path))
+                  updated = text.replace(old, new).replace(
+                      r'/1\.18\.0-luke-commerce-connector-v2/',
+                      r'/1\.18\.1-ai-knowledge-runtime/',
+                  )
+                  if updated != text:
+                      path.write_text(updated, encoding='utf-8')
+                      changed.append(str(path))
+
+          simplified = Path('backend-api/scripts/simplified-ai-runtime-regression-test.js')
+          text = simplified.read_text(encoding='utf-8')
+          text = text.replace("  '_admin.ai-knowledge.tsx',\n", '')
+          text = text.replace(
+              "for (const route of ['/ai-prompt-manager', '/ai-content-studio', '/ai-diagnostics']) {",
+              "for (const route of ['/ai-prompt-manager', '/ai-knowledge', '/ai-content-studio', '/ai-diagnostics']) {",
+          )
+          text = text.replace(
+              'assert.match(menuImages, /The only approved business-content source/);',
+              'assert.match(menuImages, /Approved menu and media source/);',
+          )
+          text = text.replace(
+              "console.log('PASS Menu & Images is the only approved business-content source');",
+              "console.log('PASS Menu & Images remains the approved media source while AI Knowledge is separate');",
+          )
+          simplified.write_text(text, encoding='utf-8')
+
+          menu = Path('admin-pro/src/routes/_admin.ai-content-studio.tsx')
+          text = menu.read_text(encoding='utf-8')
+          text = text.replace(
+              'message="The only approved business-content source"',
+              'message="Approved menu and media source"',
+          )
+          text = text.replace(
+              'description="Create real menu items, prices, availability, delivery conditions, payment methods, examples, approved images, and optional buttons here. Draft or unapproved items are never sent to the live assistant."',
+              'description="Create menu-specific facts, approved images, and optional buttons here. General assistant knowledge belongs in AI Knowledge. Draft or unapproved menu items are never sent to the live assistant."',
+          )
+          menu.write_text(text, encoding='utf-8')
+
+          prompt = Path('backend-api/src/plain-text-ai.js')
+          text = prompt.read_text(encoding='utf-8')
+          text = text.replace('APPROVED MENU AND IMAGE CONTEXT', 'APPROVED DYNAMIC CONTEXT')
+          text = text.replace(
+              'No approved Menu & Images item matched this message. Answer from the Assistant Setup without inventing exact business facts.',
+              'No approved AI Knowledge or Menu & Images item matched this message. Answer from the Assistant Setup without inventing exact business facts.',
+          )
+          prompt.write_text(text, encoding='utf-8')
+
           print('Updated runtime markers in', len(changed), 'regression file(s)')
-          for path in changed:
-              print(' -', path)
           PY
 
       - name: Validate backend
@@ -90,6 +130,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm -f .github/workflows/ai-knowledge-bootstrap.yml
           git rm -f START-AI-KNOWLEDGE-V1.18.1.bat VERIFY-AI-KNOWLEDGE-V1.18.1.bat apply-ai-knowledge-v1.18.1.mjs README-FIRST.txt || true
-          git add backend-api/src/core.js backend-api/src/server.js backend-api/src/package.json backend-api/scripts scripts admin-pro/src/routes/_admin.ai-knowledge.tsx admin-pro/src/components/AdminLayout.tsx .github/workflows/ci.yml .github/workflows/bdg-production-release.yml AI_KNOWLEDGE_V1.18.1.md
+          git add backend-api/src/core.js backend-api/src/server.js backend-api/src/plain-text-ai.js backend-api/src/package.json backend-api/scripts scripts admin-pro/src/routes/_admin.ai-knowledge.tsx admin-pro/src/routes/_admin.ai-content-studio.tsx admin-pro/src/components/AdminLayout.tsx .github/workflows/ci.yml .github/workflows/bdg-production-release.yml AI_KNOWLEDGE_V1.18.1.md
           git commit -m "v1.18.1: add scoped AI Knowledge runtime"
           git push origin HEAD:feature/v1.18.1-ai-knowledge
