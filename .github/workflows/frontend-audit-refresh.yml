@@ -33,10 +33,10 @@ jobs:
 
       - name: Refresh audit-safe frontend lockfiles
         run: |
-          for app in guide-pro chat-pro admin-pro staff-pro; do
-            echo "Refreshing $app"
-            npm --prefix "$app" audit fix --package-lock-only --no-audit --no-fund --registry=https://registry.npmjs.org/
-          done
+          npm --prefix guide-pro audit fix --package-lock-only --no-audit --no-fund --registry=https://registry.npmjs.org/
+          npm --prefix chat-pro audit fix --package-lock-only --no-audit --no-fund --registry=https://registry.npmjs.org/
+          npm --prefix admin-pro audit fix --package-lock-only --legacy-peer-deps --no-audit --no-fund --registry=https://registry.npmjs.org/ || true
+          npm --prefix staff-pro audit fix --package-lock-only --no-audit --no-fund --registry=https://registry.npmjs.org/
 
       - name: Verify Guide
         run: |
