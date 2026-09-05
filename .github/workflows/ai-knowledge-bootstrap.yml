@@ -52,6 +52,13 @@ jobs:
                       r'/1\.18\.0-luke-commerce-connector-v2/',
                       r'/1\.18\.1-ai-knowledge-runtime/',
                   )
+                  updated = updated.replace(
+                      "adminLayout.includes('const ADMIN_VERSION = \"v1.18.0\"')",
+                      "adminLayout.includes('const ADMIN_VERSION = \"v1.18.1\"')",
+                  ).replace(
+                      'Admin displays current v1.18.0',
+                      'Admin displays current v1.18.1',
+                  )
                   if updated != text:
                       path.write_text(updated, encoding='utf-8')
                       changed.append(str(path))
@@ -94,7 +101,7 @@ jobs:
           )
           prompt.write_text(text, encoding='utf-8')
 
-          print('Updated runtime markers in', len(changed), 'regression file(s)')
+          print('Updated runtime contracts in', len(changed), 'regression file(s)')
           PY
 
       - name: Validate backend
