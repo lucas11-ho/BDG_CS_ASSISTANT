@@ -26,7 +26,7 @@ function test(name, condition) {
   console.log(`PASS ${name}`);
 }
 
-test('v1.16.2 release marker is active', core.includes('1.18.0-luke-commerce-connector-v2') && server.includes('1.18.0-luke-commerce-connector-v2'));
+test('v1.16.2 release marker is active', core.includes('1.18.1-ai-knowledge-runtime') && server.includes('1.18.1-ai-knowledge-runtime'));
 test('migration 040 adds resume and read continuity fields', migration.includes('customer_resume_key_hash') && migration.includes('last_customer_read_sequence') && migration.includes('last_staff_read_sequence'));
 test('migration 040 creates one-time realtime tickets', migration.includes('CREATE TABLE IF NOT EXISTS support_realtime_tickets') && migration.includes('consumed_at') && migration.includes('expires_at'));
 test('migration 040 adds localized customer messages and fallback interval', migration.includes('customer_messages_json') && migration.includes('realtime_poll_interval_ms'));

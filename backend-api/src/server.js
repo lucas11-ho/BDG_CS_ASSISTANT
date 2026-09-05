@@ -19,7 +19,7 @@ import { allowedOrigin, databaseDescriptor, getRuntimeEnv, validateRuntimeEnv } 
 import { createR2Adapter } from './r2-adapter.js';
 
 const env = getRuntimeEnv();
-const API_VERSION = '1.18.0-luke-commerce-connector-v2';
+const API_VERSION = '1.18.1-ai-knowledge-runtime';
 const API_FEATURES = [
   'cs-workspace-shared-domain',
   'staff-self-profile-management',

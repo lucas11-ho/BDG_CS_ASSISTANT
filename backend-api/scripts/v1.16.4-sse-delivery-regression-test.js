@@ -14,7 +14,7 @@ const staff=read('staff-pro/src/App.tsx');
 const staffApi=read('staff-pro/src/api.ts');
 const migration=read('backend-api/migrations/042_v1.16.4_sse_customer_delivery_durable_queue.sql');
 const checks=[
- ['v1.16.4 release marker is active',server.includes('1.18.0-luke-commerce-connector-v2')],
+ ['v1.16.4 release marker is active',server.includes('1.18.1-ai-knowledge-runtime')],
  ['server pipes text/event-stream without buffering',server.includes("contentType.includes('text/event-stream')") && server.includes('response.body.getReader()')],
  ['node request close aborts the streaming response',server.includes('requestAbort.signal') && server.includes("res.once('close'")],
  ['customer support exposes an authenticated SSE endpoint',support.includes('customerSupportStreamResponse') && support.includes('/stream$/i')],

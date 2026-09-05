@@ -29,7 +29,7 @@ function test(name, condition) {
   console.log(`PASS ${name}`);
 }
 
-test('v1.16.1 worker foundation remains active in the current release', core.includes('1.18.0-luke-commerce-connector-v2') && server.includes('1.18.0-luke-commerce-connector-v2'));
+test('v1.16.1 worker foundation remains active in the current release', core.includes('1.18.1-ai-knowledge-runtime') && server.includes('1.18.1-ai-knowledge-runtime'));
 test('migration 039 creates a durable PostgreSQL AI queue', migration.includes('CREATE TABLE IF NOT EXISTS ai_jobs') && migration.includes("status IN ('QUEUED','PROCESSING','RETRYING','COMPLETED','FAILED','CANCELLED','SUPPRESSED')"));
 test('migration 039 adds ordered realtime messages and duplicate protection', migration.includes('message_sequence BIGINT') && migration.includes('UNIQUE(conversation_id, client_message_id)'));
 test('temporary processing text is configured outside normal messages', migration.includes('processing_message_text') && migration.includes('processing_message_secondary_text') && !core.includes("sender_type,'SYSTEM','AI_PROCESSING'"));

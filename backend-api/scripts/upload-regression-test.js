@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import api, { uploadToR2 } from '../src/core.js';
 import { createR2Adapter } from '../src/r2-adapter.js';
 
-const version = '1.18.0-luke-commerce-connector-v2';
+const version = '1.18.1-ai-knowledge-runtime';
 const env = {
   R2_ACCOUNT_ID: 'test-account',
   R2_ACCESS_KEY_ID: 'test-access-key',

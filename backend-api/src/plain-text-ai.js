@@ -185,8 +185,8 @@ Hash: ${runtimeHash || ''}
 
 ${compiledPrompt || 'Be a friendly, useful, concise customer-service assistant. Never request passwords, PINs, OTPs, or full payment credentials.'}
 
-APPROVED MENU AND IMAGE CONTEXT
-${approvedContext || 'No approved Menu & Images item matched this message. Answer from the Assistant Setup without inventing exact business facts.'}
+APPROVED DYNAMIC CONTEXT
+${approvedContext || 'No approved AI Knowledge or Menu & Images item matched this message. Answer from the Assistant Setup without inventing exact business facts.'}
 
 RECENT CONVERSATION MEMORY
 ${memorySummary || 'No prior conversation memory.'}`.trim();
