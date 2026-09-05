@@ -75,6 +75,7 @@ jobs:
           npm run test:v1174r3
           npm run test:v1174r4
           npm run test:v1180r1
+          npm run test:v1181-ai-knowledge
           npm run test:chat-reliability
           npm run test:security
           npm run test:structured
