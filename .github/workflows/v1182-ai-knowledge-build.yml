@@ -1,0 +1,32 @@
+name: Temporary v1.18.2 AI Knowledge Build
+
+on:
+  push:
+    branches:
+      - feature/v1.18.2-ai-knowledge-import-semantic
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply guarded source patch
+        run: node scripts/ci/apply-v1182-ai-knowledge-build.mjs
+      - name: Validate patch formatting
+        run: git diff --check
+      - name: Commit patched feature source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend-api admin-pro scripts .github/workflows/ci.yml .github/workflows/bdg-production-release.yml
+          git commit -m "feat: build AI Knowledge Excel library and answer-first retrieval"
+          git push origin HEAD:feature/v1.18.2-ai-knowledge-import-semantic
