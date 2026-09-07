@@ -269,7 +269,7 @@ function AiKnowledgePage() {
         showIcon
         type="info"
         message="AI Knowledge Library"
-        description="Every enabled Answer is trusted private knowledge for the AI Assistant. Question is a human-readable title/example, not a trigger. Runtime retrieval evaluates the Answer content and can combine several relevant knowledge entries. Guide-page FAQs remain separate, and AI Knowledge does not count toward the 24,000-character Assistant Setup runtime."
+        description="Every enabled Answer is trusted private knowledge for the AI Assistant. Question is a human-readable title/example, not a trigger. Runtime retrieval evaluates the Answer content and can combine several relevant knowledge entries. AI Knowledge is separate from Guide-page FAQs and does not count toward the 24,000-character Assistant Setup runtime."
         style={{ marginBottom: 12 }}
       />
       <div className="bdg-filters" style={{ marginBottom: 12 }}>
