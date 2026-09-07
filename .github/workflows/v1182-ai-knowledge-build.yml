@@ -19,8 +19,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Adapt guarded patch to CI command shape
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/ci/apply-v1182-ai-knowledge-build.mjs')
+          source = path.read_text()
+          marker = "for (const rel of ['.github/workflows/ci.yml', '.github/workflows/bdg-production-release.yml']) {"
+          replacement = """patch('.github/workflows/ci.yml', (source) => replaceOnce(
+            source,
+            '          npm run test:v1181-ai-knowledge\\n',
+            '          npm run test:v1181-ai-knowledge\\n          npm run test:v1182-ai-knowledge\\n',
+            '.github/workflows/ci.yml v1.18.2 test',
+          ));
+
+          for (const rel of ['.github/workflows/bdg-production-release.yml']) {"""
+          if source.count(marker) != 1:
+              raise SystemExit('Could not find the workflow patch marker exactly once')
+          path.write_text(source.replace(marker, replacement, 1))
+          PY
       - name: Apply guarded source patch
         run: node scripts/ci/apply-v1182-ai-knowledge-build.mjs
+      - name: Restore temporary patch helper
+        run: git checkout -- scripts/ci/apply-v1182-ai-knowledge-build.mjs
       - name: Validate patch formatting
         run: git diff --check
       - name: Commit patched feature source
