@@ -24,7 +24,7 @@ const test = (name, ok) => {
   else { passed += 1; console.log('PASS', name); }
 };
 
-test('v1.17.2 Luke Shared Hosting foundation remains active', core.includes('luke-shared-hosting') && core.includes('shared-platform-route-resolution') && server.includes('1.18.1-ai-knowledge-runtime'));
+test('v1.17.2 Luke Shared Hosting foundation remains active', core.includes('luke-shared-hosting') && core.includes('shared-platform-route-resolution') && server.includes('1.18.2-ai-knowledge-library'));
 test('backend package version is current v1.18.0', backendPackage.version === '1.18.0');
 test('migration 045 adds hosting mode', migration.includes('hosting_mode VARCHAR(30)') && migration.includes("'luke_shared','custom_domain'"));
 test('migration 045 preserves existing public route keys', !migration.includes('SET public_route_key='));

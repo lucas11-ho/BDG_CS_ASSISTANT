@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import ExcelJS from 'exceljs';
 import { importedRowToAiContentDraft, parseKnowledgeWorkbook } from './knowledge-import.js';
+import { applyAiKnowledgeImport, buildAiKnowledgeTemplate, previewAiKnowledgeImport } from './ai-knowledge-library.js';
 import { applySqlMigrationFiles } from './migration-files.js';
 import { fetchPublicHttpsText, validatePublicHttpsUrl } from './network-safety.js';
 import { getCommerceConnector, updateCommerceConnector, testCommerceConnector, listCommerceAudit, resolveCommerceFacts, commerceFactsForPrompt, commerceFallbackText } from './commerce-connector.js';
@@ -37,7 +38,7 @@ const { Pool } = pg;
 const scryptAsync = promisify(scryptCallback);
 const pools = new Map();
 
-const VERSION = '1.18.1-ai-knowledge-runtime';
+const VERSION = '1.18.2-ai-knowledge-library';
 const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
 const PBKDF2_ITERATIONS = 60000; // Compatibility cap only; new admin passwords use Worker-safe salted SHA-256.
 const DEFAULT_SUPPORT = 'https://t.me/your_support_bot';
@@ -378,6 +379,16 @@ async function route(request, env, url) {
   if (method === 'DELETE' && /^\/admin\/faqs\/\d+$/.test(path)) return json(await deleteById(env, 'faqs', idFromPath(path), scope), 200, env);
 
   // AI Knowledge is a private assistant-only knowledge source. It is separate from Guide-page FAQs.
+  if (method === 'GET' && path === '/admin/knowledge/template') {
+    const workbook = await buildAiKnowledgeTemplate();
+    return new Response(workbook, { status:200, headers:{ ...corsHeaders(env), 'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition':'attachment; filename="AI_Knowledge_Import_Template.xlsx"', 'Cache-Control':'no-store' } });
+  }
+  if (method === 'POST' && path === '/admin/knowledge/import-preview') return json(await previewAiKnowledgeImport(request, scope, (sql, params) => q(env, sql, params)), 200, env);
+  if (method === 'POST' && path === '/admin/knowledge/import') {
+    const result = await applyAiKnowledgeImport(request, scope, (sql, params) => q(env, sql, params));
+    await audit(env, 'import', 'knowledge_items', 'excel', `AI Knowledge Excel import: ${result.created} created, ${result.updated} updated, ${result.skipped} skipped`, scope);
+    return json(result, 200, env);
+  }
   if (method === 'GET' && path === '/admin/knowledge') return json(await listKnowledge(env, scope), 200, env);
   if (method === 'POST' && path === '/admin/knowledge') return json(await createKnowledge(env, await readJson(request), scope), 200, env);
   if (method === 'PUT' && /^\/admin\/knowledge\/\d+$/.test(path)) return json(await updateKnowledge(env, idFromPath(path), await readJson(request), scope), 200, env);
@@ -5630,10 +5641,10 @@ async function promptFirstAiResponse(env, settings, message, lang, session, plat
   const ranked = rankApprovedMenuCandidates(message, unified.rows, 3);
   const selectedEntry = ranked[0] || null;
   const selected = selectedEntry?.row || null;
-  const rankedKnowledge = rankApprovedMenuCandidates(message, knowledgeRows, 3);
+  const rankedKnowledge = rankApprovedMenuCandidates(message, knowledgeRows, 5);
   const approvedContexts = ranked.map((entry, index) => `Candidate ${index + 1}:\n${aiContentPromptContext(entry.row, lang)}`).join('\n\n---\n\n');
   const knowledgeContexts = rankedKnowledge.map((entry, index) =>
-    `Knowledge ${index + 1}:\nQuestion: ${promptClip(entry.row.title || '', 500)}\nType: ${promptClip(entry.row.keywords || 'General', 200)}\nApproved answer: ${promptClip(entry.row.knowledge_content || '', 4500)}`
+    `Knowledge ${index + 1}:\nReference title: ${promptClip(entry.row.title || '', 500)}\nType: ${promptClip(entry.row.keywords || 'General', 200)}\nApproved knowledge: ${promptClip(entry.row.knowledge_content || '', 4500)}`
   ).join('\n\n---\n\n');
   const dynamicApprovedContext = [
     knowledgeContexts ? `APPROVED AI KNOWLEDGE\n${knowledgeContexts}` : '',
