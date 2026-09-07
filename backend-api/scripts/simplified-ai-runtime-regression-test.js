@@ -22,8 +22,8 @@ const redirects = [
   '_admin.ai-response-quality.tsx',
 ].map((file) => read(`admin-pro/src/routes/${file}`));
 
-assert.match(core, /1\.18\.1-ai-knowledge-runtime/);
-assert.match(server, /1\.18\.1-ai-knowledge-runtime/);
+assert.match(core, /1\.18\.2-ai-knowledge-library/);
+assert.match(server, /1\.18\.2-ai-knowledge-library/);
 assert.match(core, /source_order:\['prompt_image'\]/);
 assert.match(core, /enabled_sources:\['prompt_image'\]/);
 assert.match(core, /source_type='prompt_image'/);
