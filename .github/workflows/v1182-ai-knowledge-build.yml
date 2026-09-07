@@ -40,14 +40,16 @@ jobs:
           PY
       - name: Apply guarded source patch
         run: node scripts/ci/apply-v1182-ai-knowledge-build.mjs
-      - name: Restore temporary patch helper
-        run: git checkout -- scripts/ci/apply-v1182-ai-knowledge-build.mjs
+      - name: Restore temporary and connector-managed files
+        run: |
+          git checkout -- scripts/ci/apply-v1182-ai-knowledge-build.mjs
+          git checkout -- .github/workflows/ci.yml .github/workflows/bdg-production-release.yml
       - name: Validate patch formatting
         run: git diff --check
       - name: Commit patched feature source
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend-api admin-pro scripts .github/workflows/ci.yml .github/workflows/bdg-production-release.yml
+          git add backend-api admin-pro scripts
           git commit -m "feat: build AI Knowledge Excel library and answer-first retrieval"
           git push origin HEAD:feature/v1.18.2-ai-knowledge-import-semantic
