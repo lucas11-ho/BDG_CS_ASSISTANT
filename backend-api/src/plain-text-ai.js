@@ -82,6 +82,64 @@ function candidatePhrases(row = {}) {
   return [...new Set(values.flatMap(splitPhrases).map((value)=>value.trim()).filter(Boolean))];
 }
 
+function retrievalTokenRelated(left, right) {
+  if (left === right) return true;
+  if (left.length < 4 || right.length < 4) return false;
+  const short = left.length <= right.length ? left : right;
+  const long = left.length <= right.length ? right : left;
+  const prefix = short.slice(0, Math.min(6, short.length));
+  return prefix.length >= 4 && long.startsWith(prefix) && Math.abs(left.length - right.length) <= 5;
+}
+function knowledgeAnswerPhrases(value) {
+  return String(value || '').split(/[\n.!?。！？။]+/u).map((item) => item.trim()).filter((item) => item.length > 3).slice(0, 40);
+}
+function rankKnowledgeContentCandidate(message, row) {
+  const answer = String(row.knowledge_content || row.content || '').trim();
+  if (!answer) return null;
+  const messageTokens = [...new Set(tokenizeForRetrieval(message))];
+  if (!messageTokens.length) return null;
+  const answerTokens = [...new Set(tokenizeForRetrieval(answer))];
+  const matched = messageTokens.filter((token) => answerTokens.some((candidate) => retrievalTokenRelated(token, candidate)));
+  const directOverlap = messageTokens.filter((token) => answerTokens.includes(token)).length;
+  const messageCoverage = matched.length / messageTokens.length;
+  const answerPhrases = knowledgeAnswerPhrases(answer);
+  const messageNgrams = charNgrams(message);
+  let bestSimilarity = 0;
+  let matchedPhrase = '';
+  for (const phrase of answerPhrases) {
+    const similarity = jaccard(messageNgrams, charNgrams(phrase));
+    if (similarity > bestSimilarity) { bestSimilarity = similarity; matchedPhrase = phrase; }
+  }
+  const typeTokens = tokenizeForRetrieval(row.keywords || row.category || '');
+  const typeOverlap = messageTokens.filter((token) => typeTokens.some((candidate) => retrievalTokenRelated(token, candidate))).length;
+  const titleTokens = tokenizeForRetrieval(row.title || '');
+  const titleOverlap = messageTokens.filter((token) => titleTokens.some((candidate) => retrievalTokenRelated(token, candidate))).length;
+  // Answer content is the routing evidence. Question/title and Type are only light context,
+  // so an exact Question can never select unrelated knowledge by itself.
+  if (!matched.length && bestSimilarity < 0.12) return null;
+  const score = Math.min(100,
+    messageCoverage * 62 +
+    bestSimilarity * 28 +
+    Math.min(2, typeOverlap) * 3 +
+    Math.min(2, titleOverlap) * 2 +
+    Math.min(2, directOverlap) * 2
+  );
+  const threshold = 18;
+  if (score < threshold) return null;
+  return {
+    row,
+    score:Number(score.toFixed(2)),
+    threshold,
+    method:'knowledge_content_semantic',
+    matchedPhrase,
+    overlap:matched.length,
+    titleOverlap,
+    tokenCoverage:Number(messageCoverage.toFixed(3)),
+    phraseSimilarity:Number(bestSimilarity.toFixed(3)),
+    titleSimilarity:Number(jaccard(messageNgrams, charNgrams(row.title || '')).toFixed(3)),
+  };
+}
+
 export function rankApprovedMenuCandidates(message, rows = [], limit = 3) {
   const messageTokens = tokenizeForRetrieval(message);
   const messageSet = new Set(messageTokens);
@@ -90,6 +148,11 @@ export function rankApprovedMenuCandidates(message, rows = [], limit = 3) {
   if (!messagePhrase) return [];
   const ranked = [];
   for (const row of rows) {
+    if (row?.source_type === 'knowledge') {
+      const knowledgeRank = rankKnowledgeContentCandidate(message, row);
+      if (knowledgeRank) ranked.push(knowledgeRank);
+      continue;
+    }
     const sourceText=candidateText(row);
     const sourceTokens = tokenizeForRetrieval(sourceText);
     const sourceSet = new Set(sourceTokens);

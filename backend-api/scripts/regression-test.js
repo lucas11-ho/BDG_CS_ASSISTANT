@@ -40,7 +40,7 @@ const chatApp = read("chat-pro/src/App.tsx");
 const chatConfig = read("chat-pro/src/lib/chat-config.ts");
 const plainTextAi = read("backend-api/src/plain-text-ai.js");
 
-expect("Backend and server retain the SSE delivery runtime on the current release", core.includes("1.18.1-ai-knowledge-runtime") && server.includes("1.18.1-ai-knowledge-runtime"));
+expect("Backend and server retain the SSE delivery runtime on the current release", core.includes("1.18.2-ai-knowledge-library") && server.includes("1.18.2-ai-knowledge-library"));
 expect("Domain route IDs are extracted from the numeric path segment", core.includes("function domainIdFromPath") && core.includes("Number.isSafeInteger(id)") && core.includes("DOMAIN_ID_INVALID"));
 expect("Provision uses the validated domain ID", core.includes("provisionMappedDomain(env, domainIdFromPath(path), scope)") && !core.includes("provisionMappedDomain(env, idFromParts(path, 3), scope)"));
 expect("Sync, verify, and delete use the validated domain ID", ["syncMappedDomain(env, domainIdFromPath(path), scope)", "verifyMappedDomain(env, domainIdFromPath(path), scope)", "deleteMappedDomain(env, domainIdFromPath(path), scope)"].every((item) => core.includes(item)));
@@ -51,7 +51,7 @@ expect("Domain mapping exposes missing configuration names", core.includes("cons
 expect("Render environment validation covers Cloudflare prerequisites", env.includes("CLOUDFLARE_CUSTOM_HOSTNAMES_ENABLED") && env.includes("CLOUDFLARE_API_TOKEN") && env.includes("CLOUDFLARE_ZONE_ID") && env.includes("CLOUDFLARE_SAAS_CNAME_TARGET"));
 expect("Admin disables Provision until Cloudflare is configured", domainPage.includes("const cloudflareReady = data?.cloudflare?.configured === true") && domainPage.includes("disabled={!cloudflareReady}"));
 expect("Admin displays the exact missing Render variables", domainPage.includes("data?.cloudflare?.missing_env") && domainPage.includes("Configure these Render variables only when you need client-owned custom domains"));
-expect("Admin release marker is v1.18.0", adminLayout.includes('const ADMIN_VERSION = "v1.18.1"'));
+expect("Admin release marker is v1.18.0", adminLayout.includes('const ADMIN_VERSION = "v1.18.2"'));
 expect("v1.14.1 single-image contract remains present", core.includes("const legacyContentImages = imageDelivery.image_count ? [] : contentImages") && core.includes("A response without procedural steps has one canonical visual at most"));
 expect("Platform context remains strict with no fallback", core.includes("PLATFORM_CONTEXT_REQUIRED") && core.includes("fallback_applied: false") && !core.includes("publicReference || 'default'"));
 expect("v1.14.3 migration repairs existing parent Guide drafts", publishingMigration.includes("UPDATE guides g") && publishingMigration.includes("gt.status = 'published'"));

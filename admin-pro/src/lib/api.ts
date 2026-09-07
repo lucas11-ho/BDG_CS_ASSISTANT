@@ -882,12 +882,17 @@ export const api = {
     const body = new FormData();
     body.append("file", file);
     body.append("platform_key", platform_key);
-    const res = await fetch(`${API_BASE_URL}/admin/knowledge-imports/preview`, { method: "POST", headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...platformHeaders() }, body });
+    const res = await fetch(`${API_BASE_URL}/admin/knowledge/import-preview`, { method: "POST", headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...platformHeaders() }, body });
     const text = await res.text();
     let payload: any = null;
     try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
     if (!res.ok) throw new Error(`Import preview failed: ${payload?.error || payload?.message || res.statusText}`);
     return payload;
+  },
+
+  importAiKnowledgeWorkbook: async (file: File) => {
+    if (MOCK_MODE) return delay({ ok: true, created: 1, updated: 0, skipped: 0 });
+    return uploadAdminFile(file, "/admin/knowledge/import") as Promise<any>;
   },
 
   listKnowledgeImports: async () => {
@@ -903,7 +908,7 @@ export const api = {
   downloadKnowledgeImportTemplate: async () => {
     if (MOCK_MODE || !API_BASE_URL) return;
     const token = getToken();
-    const res = await fetch(`${API_BASE_URL}/admin/knowledge-imports/template`, {
+    const res = await fetch(`${API_BASE_URL}/admin/knowledge/template`, {
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...platformHeaders() },
       signal: AbortSignal.timeout(20000),
     });

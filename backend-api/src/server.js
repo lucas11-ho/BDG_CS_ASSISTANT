@@ -19,7 +19,7 @@ import { allowedOrigin, databaseDescriptor, getRuntimeEnv, validateRuntimeEnv } 
 import { createR2Adapter } from './r2-adapter.js';
 
 const env = getRuntimeEnv();
-const API_VERSION = '1.18.1-ai-knowledge-runtime';
+const API_VERSION = '1.18.2-ai-knowledge-library';
 const API_FEATURES = [
   'cs-workspace-shared-domain',
   'staff-self-profile-management',
