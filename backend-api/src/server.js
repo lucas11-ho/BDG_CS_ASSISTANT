@@ -20,7 +20,7 @@ import { createR2Adapter } from './r2-adapter.js';
 import { handleBulkContentRoute } from './bulk-content-studio.js';
 
 const env = getRuntimeEnv();
-const API_VERSION = '1.18.2-ai-knowledge-library';
+const API_VERSION = '1.18.4-guide-faq-bulk-content';
 const API_FEATURES = [
   'cs-workspace-shared-domain',
   'staff-self-profile-management',
@@ -234,9 +234,9 @@ async function handleHealth(path) {
       await env.GUIDE_IMAGES.health();
       r2 = 'ok';
     }
-    return { ...db, features:API_FEATURES, r2, deepseek: env.DEEPSEEK_API_KEY ? 'configured' : 'not_configured', timestamp: new Date().toISOString() };
+    return { ...db, version: API_VERSION, features:API_FEATURES, r2, deepseek: env.DEEPSEEK_API_KEY ? 'configured' : 'not_configured', timestamp: new Date().toISOString() };
   }
-  return { ...db, features:API_FEATURES, runtime: 'render-node-neon', timestamp: new Date().toISOString() };
+  return { ...db, version: API_VERSION, features:API_FEATURES, runtime: 'render-node-neon', timestamp: new Date().toISOString() };
 }
 
 async function authenticatedBulkResponse(request, env, url, path, requestHeaders, signal) {
