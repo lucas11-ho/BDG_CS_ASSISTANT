@@ -36,9 +36,11 @@ test('Nano ID hotfix still introduces no dedicated migration 049', () => assert.
 test('Commerce Connector v2 migration 048 remains present after later additive migrations', () => {
   assert.ok(fs.existsSync(path.join(repo, 'backend-api', 'migrations', '048_v1.18.0_luke_shop_commerce_connector_v2.sql')));
 });
-test('v1.18.4 owns the next additive migration without changing the Nano ID hotfix contract', () => {
-  const files = fs.readdirSync(path.join(repo, 'backend-api', 'migrations')).filter((x) => /^\d+_.*\.sql$/.test(x)).sort();
-  assert.ok(files.at(-1)?.startsWith('049_v1.18.4_'));
+test('v1.18.4 owns later additive migrations without changing the Nano ID hotfix contract', () => {
+  const migrations = path.join(repo, 'backend-api', 'migrations');
+  const files = fs.readdirSync(migrations).filter((x) => /^\d+_.*\.sql$/.test(x)).sort();
+  assert.ok(files.some((x) => x.startsWith('049_v1.18.4_')));
+  assert.ok(files.at(-1)?.startsWith('050_v1.18.4_r2_'));
 });
 
 console.log(`${checks.length}/${checks.length} v1.18.0-R1 Nano ID dependency security checks passed.`);
