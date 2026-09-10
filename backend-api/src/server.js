@@ -20,6 +20,7 @@ import { createR2Adapter } from './r2-adapter.js';
 import { handleBulkContentRoute } from './bulk-content-studio.js';
 
 const env = getRuntimeEnv();
+// Carries forward the 1.18.2-ai-knowledge-library runtime contract while the edge release marker advances.
 const API_VERSION = '1.18.4-guide-faq-bulk-content';
 const API_FEATURES = [
   'cs-workspace-shared-domain',
