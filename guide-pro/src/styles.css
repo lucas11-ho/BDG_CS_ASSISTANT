@@ -160,3 +160,11 @@
     color: var(--color-foreground);
   }
 }
+
+/* Runtime Guide typography must win over static Tailwind font utilities.
+ * The Apple stack uses SF on Apple devices and a Helvetica-like Arial fallback
+ * on Windows so the iOS option is visibly different from the default Segoe UI stack. */
+.guide-runtime-font,
+.guide-runtime-font :where(h1, h2, h3, h4, h5, h6, p, span, a, button, input, textarea, select, option, label, li, td, th, blockquote, figcaption, code) {
+  font-family: var(--guide-runtime-font, var(--font-sans)) !important;
+}
