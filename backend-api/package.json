@@ -11,7 +11,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "migrate": "node src/migrate.js",
-    "check": "node --check src/server.js && node --check src/core.js && node --check src/chat-reliability.js && node --check src/prompt-runtime.js && node --check src/support-auth.js && node --check src/support-events.js && node --check src/support-service.js && node --check src/support-realtime.js && node --check src/plain-text-ai.js && node --check src/ai-job-worker.js && node --check src/r2-adapter.js && node --check src/env.js && node --check src/rich-html.js && node --check src/network-safety.js && node --check src/commerce-connector.js && node --check src/migration-files.js",
+    "check": "node --check src/server.js && node --check src/core.js && node --check src/bulk-content-studio.js && node --check src/chat-reliability.js && node --check src/prompt-runtime.js && node --check src/support-auth.js && node --check src/support-events.js && node --check src/support-service.js && node --check src/support-realtime.js && node --check src/plain-text-ai.js && node --check src/ai-job-worker.js && node --check src/r2-adapter.js && node --check src/env.js && node --check src/rich-html.js && node --check src/network-safety.js && node --check src/commerce-connector.js && node --check src/migration-files.js",
     "smoke": "node scripts/smoke-test.js",
     "test:regression": "node scripts/regression-test.js",
     "test:upload": "node scripts/upload-regression-test.js",
@@ -42,7 +42,8 @@
     "test:v1180r1": "node scripts/v1.18.0-r1-nanoid-security-hotfix-regression-test.js",
     "test:v1181-ai-knowledge": "node scripts/v1.18.1-ai-knowledge-regression-test.js",
     "test:v1182-ai-knowledge": "node scripts/v1.18.2-ai-knowledge-library-regression-test.js",
-    "test:v1183-frontend": "node scripts/v1.18.3-platform-brand-localization-regression-test.js"
+    "test:v1183-frontend": "node scripts/v1.18.3-platform-brand-localization-regression-test.js",
+    "test:v1184-bulk-content": "node scripts/v1.18.4-bulk-content-studio-regression-test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1085.0",
