@@ -34,7 +34,7 @@ test('normal CI executes the v1.18.0-R1 Nano ID security guard', () => assert.ma
 test('production CI executes the v1.18.0-R1 Nano ID security guard', () => assert.match(prod, /test:v1180r1/));
 test('Nano ID hotfix still introduces no dedicated migration 049', () => assert.ok(!fs.existsSync(path.join(repo, 'backend-api', 'migrations', '049_v1.18.0_r1_nanoid_security_hotfix.sql'))));
 test('Commerce Connector v2 migration 048 remains present after later additive migrations', () => {
-  assert.ok(fs.existsSync(path.join(repo, 'backend-api', 'migrations', '048_v1.18.0_commerce_connector_v2.sql')));
+  assert.ok(fs.existsSync(path.join(repo, 'backend-api', 'migrations', '048_v1.18.0_luke_shop_commerce_connector_v2.sql')));
 });
 test('v1.18.4 owns the next additive migration without changing the Nano ID hotfix contract', () => {
   const files = fs.readdirSync(path.join(repo, 'backend-api', 'migrations')).filter((x) => /^\d+_.*\.sql$/.test(x)).sort();
