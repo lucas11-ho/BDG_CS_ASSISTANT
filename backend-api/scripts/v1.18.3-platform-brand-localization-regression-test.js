@@ -77,6 +77,14 @@ for (const [kind, runtime, main] of runtimes) {
     assert.ok(runtime.includes('x-platform-web-identity'));
     assert.ok(main.includes('installWebIdentityRuntime'));
   });
+  test(`${kind} browser runtime avoids self-triggered MutationObserver loops`, () => {
+    assert.ok(runtime.includes('function setAttributeIfChanged'));
+    assert.ok(runtime.includes('setAttributeIfChanged(favicon, "data-platform-runtime-favicon", "true")'));
+    assert.ok(runtime.includes('setAttributeIfChanged(favicon, "data-platform-favicon", "true")'));
+    assert.ok(runtime.includes('setAttributeIfChanged(apple, "data-platform-runtime-apple-icon", "true")'));
+    assert.ok(!runtime.includes('favicon.setAttribute("data-platform-runtime-favicon", "true")'));
+    assert.ok(!runtime.includes('apple.setAttribute("data-platform-runtime-apple-icon", "true")'));
+  });
 }
 
 test('Shared HTML shells no longer expose legacy BDG identity', () => {

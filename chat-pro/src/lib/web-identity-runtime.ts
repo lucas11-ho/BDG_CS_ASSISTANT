@@ -55,6 +55,10 @@ function normalizeIdentity(value: any): WebIdentity | null {
   };
 }
 
+function setAttributeIfChanged(node: Element, name: string, value: string) {
+  if (node.getAttribute(name) !== value) node.setAttribute(name, value);
+}
+
 function upsertMeta(selector: string, attrs: Record<string, string>, content: string) {
   let node = document.querySelector<HTMLMetaElement>(selector);
   if (!node) {
@@ -95,13 +99,13 @@ function applyIdentity(identity: WebIdentity) {
   }
   if (identity.faviconUrl) {
     const favicon = upsertLink('link[data-platform-runtime-favicon="true"]', "icon", identity.faviconUrl);
-    favicon.setAttribute("data-platform-runtime-favicon", "true");
-    favicon.setAttribute("data-platform-favicon", "true");
+    setAttributeIfChanged(favicon, "data-platform-runtime-favicon", "true");
+    setAttributeIfChanged(favicon, "data-platform-favicon", "true");
     document.querySelectorAll<HTMLLinkElement>('link[data-platform-favicon="true"]').forEach((link) => {
       if (link !== favicon) link.remove();
     });
     const apple = upsertLink('link[data-platform-runtime-apple-icon="true"]', "apple-touch-icon", identity.faviconUrl);
-    apple.setAttribute("data-platform-runtime-apple-icon", "true");
+    setAttributeIfChanged(apple, "data-platform-runtime-apple-icon", "true");
   }
 }
 
