@@ -1,14 +1,14 @@
 import { readdir, readFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 
 const [site, distDirectory] = process.argv.slice(2);
 const apiHost = "bdg-ai-help-api-render.onrender.com";
 
 const checks = {
   guide: [apiHost, "Close image"],
-  chat: [apiHost, "Close image", "favicon-chat-32.png?v=0101"],
-  admin: [apiHost, "FAQ answer", "favicon-admin-32.png?v=0101"],
-  staff: [apiHost, "Customer Service Console"],
+  chat: [apiHost, "Close image", "/__platform/identity", "x-platform-web-identity"],
+  admin: [apiHost, "FAQ answer", "/__platform/identity", "x-platform-web-identity"],
+  staff: [apiHost, "Customer Service Console", "/__platform/identity", "x-platform-web-identity"],
 };
 
 if (!checks[site] || !distDirectory) {
