@@ -1,6 +1,7 @@
 const SITE_KIND = "chat";
 const API_BASE = "https://bdg-ai-help-api-render.onrender.com";
 const SITE_LABELS = { guide: "Help Center", chat: "Support Chat", admin: "Admin", staff: "Staff Console" };
+const FAVICON_FIELDS = { guide: "guide_favicon_url", chat: "chat_favicon_url", admin: "admin_favicon_url", staff: "" };
 
 function platformReference(url) {
   const fromPath = url.pathname.match(/^\/p\/([a-z0-9-]+)(?:\/|$)/i)?.[1];
@@ -14,8 +15,11 @@ async function loadManifest(incomingUrl) {
   const apiUrl = new URL("/guide/content", API_BASE);
   if (reference) apiUrl.searchParams.set("platform", reference);
   const headers = { Accept: "application/json" };
-  if (!reference) { headers["X-Forwarded-Host"] = incomingUrl.hostname; headers["X-Forwarded-Proto"] = "https"; }
-  const response = await fetch(apiUrl.toString(), { headers });
+  if (!reference) {
+    headers["X-Forwarded-Host"] = incomingUrl.hostname;
+    headers["X-Forwarded-Proto"] = "https";
+  }
+  const response = await fetch(apiUrl.toString(), { headers, cf: { cacheTtl: 0, cacheEverything: false } });
   if (!response.ok) return null;
   return response.json();
 }
@@ -28,13 +32,14 @@ function identityFrom(manifest) {
   const brandName = safeText(settings.brand_name || settings.app_name) || "Support";
   const browserTitle = safeText(content[`${prefix}browser_title`]) || `${brandName} — ${SITE_LABELS[SITE_KIND]}`;
   const description = safeText(content[`${prefix}description`]) || safeText(settings.brand_tagline) || `${brandName} ${SITE_LABELS[SITE_KIND]}`;
+  const faviconField = FAVICON_FIELDS[SITE_KIND];
   return {
     browserTitle,
     description,
     previewTitle: safeText(content[`${prefix}preview_title`]) || browserTitle,
     previewDescription: safeText(content[`${prefix}preview_description`]) || description,
     previewImageUrl: safeText(content[`${prefix}preview_image_url`]),
-    faviconUrl: safeText(content[`${prefix}favicon_url`]) || safeText(settings.chat_favicon_url),
+    faviconUrl: safeText(content[`${prefix}favicon_url`]) || safeText(faviconField ? settings[faviconField] : ""),
   };
 }
 
@@ -43,6 +48,7 @@ function rewriteHtml(html, identity, requestUrl) {
   html = html.replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, `<title data-platform-meta="title">${escapeHtml(identity.browserTitle)}</title>`);
   html = html.replace(/<(?:meta|link)\b[^>]*data-platform-meta(?:=(?:"[^"]*"|'[^']*'))?[^>]*>\s*/gi, "");
   const tags = [
+    `<meta data-platform-meta="identity" name="x-platform-web-identity" content="1" />`,
     `<meta data-platform-meta="description" name="description" content="${escapeHtml(identity.description)}" />`,
     `<meta data-platform-meta="og-title" property="og:title" content="${escapeHtml(identity.previewTitle)}" />`,
     `<meta data-platform-meta="og-description" property="og:description" content="${escapeHtml(identity.previewDescription)}" />`,
@@ -63,14 +69,42 @@ function rewriteHtml(html, identity, requestUrl) {
   return html.replace(/<\/head>/i, `${tags.join("\n    ")}\n  </head>`);
 }
 
+function identityResponse(manifest) {
+  const identity = identityFrom(manifest);
+  return new Response(JSON.stringify({
+    ok: Boolean(identity),
+    site_kind: SITE_KIND,
+    platform_reference: safeText(manifest?.platform_reference),
+    identity,
+  }), {
+    status: identity ? 200 : 404,
+    headers: {
+      "content-type": "application/json; charset=UTF-8",
+      "cache-control": "no-store",
+      "x-robots-tag": "noindex, nofollow",
+    },
+  });
+}
+
 export default {
   async fetch(request, env) {
+    const incomingUrl = new URL(request.url);
+    if (incomingUrl.pathname === "/__platform/identity") {
+      try { return identityResponse(await loadManifest(incomingUrl)); }
+      catch (error) {
+        console.warn("platform web identity endpoint unavailable", error);
+        return new Response(JSON.stringify({ ok: false, site_kind: SITE_KIND, identity: null }), {
+          status: 503,
+          headers: { "content-type": "application/json; charset=UTF-8", "cache-control": "no-store", "x-robots-tag": "noindex, nofollow" },
+        });
+      }
+    }
+
     let response = await env.ASSETS.fetch(request);
     const accept = request.headers.get("accept") || "";
     if (response.status === 404 && accept.includes("text/html")) response = await env.ASSETS.fetch(new Request(new URL("/index.html", request.url), request));
     if (!(response.headers.get("content-type") || "").includes("text/html")) return response;
     try {
-      const incomingUrl = new URL(request.url);
       const identity = identityFrom(await loadManifest(incomingUrl));
       const html = rewriteHtml(await response.text(), identity, incomingUrl.toString());
       const headers = new Headers(response.headers);
