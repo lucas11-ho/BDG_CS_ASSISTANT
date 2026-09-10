@@ -30,10 +30,10 @@ const apps = ['admin-pro', 'chat-pro', 'guide-pro', 'staff-pro'];
 
 for (const app of apps) {
   const lock = readJson(app, 'package-lock.json');
-  test(`${app} has no js-yaml below patched 4.3.1`, () => {
+  test(`${app} has no js-yaml below patched 4.3.2`, () => {
     const versions = packageVersions(lock, 'js-yaml');
     assert.ok(
-      versions.every((version) => versionAtLeast(version, '4.3.1')),
+      versions.every((version) => versionAtLeast(version, '4.3.2')),
       `Unsafe js-yaml lock entries found: ${versions.join(', ')}`,
     );
   });
@@ -49,7 +49,7 @@ test('Guide DOMPurify resolves from the npm registry', () => assert.equal(guideL
 
 for (const app of apps) {
   const text = fs.readFileSync(path.join(repo, app, 'package-lock.json'), 'utf8');
-  test(`${app} no longer locks vulnerable js-yaml 4.3.0`, () => assert.ok(!text.includes('js-yaml-4.3.0.tgz')));
+  test(`${app} no longer locks vulnerable js-yaml releases below 4.3.2`, () => assert.ok(!text.includes('js-yaml-4.3.0.tgz') && !text.includes('js-yaml-4.3.1.tgz')));
   test(`${app} does not lock Nano ID below patched 3.3.18`, () => assert.ok(!text.includes('nanoid-3.3.16.tgz') && !text.includes('nanoid-3.3.17.tgz')));
 }
 
