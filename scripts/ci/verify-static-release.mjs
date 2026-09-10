@@ -8,7 +8,7 @@ const checks = {
   guide: [apiHost, "Close image"],
   chat: [apiHost, "Close image", "/__platform/identity", "x-platform-web-identity"],
   admin: [apiHost, "FAQ answer", "/__platform/identity", "x-platform-web-identity"],
-  staff: [apiHost, "Customer Service Console", "/__platform/identity", "x-platform-web-identity"],
+  staff: [apiHost, "Luke CS Workspace", "/__platform/identity", "x-platform-web-identity"],
 };
 
 if (!checks[site] || !distDirectory) {
