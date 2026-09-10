@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import AdminLayout from "@/components/AdminLayout";
+import BulkContentRouteToolbar from "@/components/BulkContentRouteToolbar";
 
 export const Route = createFileRoute("/_admin")({
   beforeLoad: () => {
@@ -10,6 +11,7 @@ export const Route = createFileRoute("/_admin")({
   },
   component: () => (
     <AdminLayout>
+      <BulkContentRouteToolbar />
       <Outlet />
     </AdminLayout>
   ),
