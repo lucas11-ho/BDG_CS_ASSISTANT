@@ -17,6 +17,7 @@ import { closeSupportEventBus } from './support-events.js';
 import { startAiJobWorker } from './ai-job-worker.js';
 import { allowedOrigin, databaseDescriptor, getRuntimeEnv, validateRuntimeEnv } from './env.js';
 import { createR2Adapter } from './r2-adapter.js';
+import { handleBulkContentRoute } from './bulk-content-studio.js';
 
 const env = getRuntimeEnv();
 const API_VERSION = '1.18.2-ai-knowledge-library';
@@ -168,13 +169,14 @@ const API_FEATURES = [
   'immutable-file-migrations',
   'server-rich-html-sanitization',
   'connector-dns-ssrf-guard',
-  'postgres-api-integration-tests'
+  'postgres-api-integration-tests',
+  'faq-guide-bulk-content-studio',
+  'guide-embedded-cell-image-import'
 ];
 validateRuntimeEnv(env);
 env.GUIDE_IMAGES = createR2Adapter(env);
 
 const counters = new Map();
-// Theme, chat content, and Guide Page content are excluded so Admin changes publish immediately.
 const publicCachePaths = new Set(['/popular-help', '/public/popular-help', '/navigation', '/public/navigation', '/categories', '/public/categories', '/guides', '/public/guides', '/faqs', '/public/faqs', '/action-buttons', '/public/action-buttons']);
 
 function clientIp(req) {
@@ -202,7 +204,7 @@ async function readBody(req) {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > env.MAX_REQUEST_BYTES) {
+    if (size > Math.max(env.MAX_REQUEST_BYTES, 22 * 1024 * 1024)) {
       const error = new Error('Request body is too large');
       error.status = 413;
       throw error;
@@ -235,6 +237,25 @@ async function handleHealth(path) {
     return { ...db, features:API_FEATURES, r2, deepseek: env.DEEPSEEK_API_KEY ? 'configured' : 'not_configured', timestamp: new Date().toISOString() };
   }
   return { ...db, features:API_FEATURES, runtime: 'render-node-neon', timestamp: new Date().toISOString() };
+}
+
+async function authenticatedBulkResponse(request, env, url, path, requestHeaders, signal) {
+  const contextUrl = new URL('/admin/platform-context', url.origin);
+  const contextRequest = new Request(contextUrl, { method: 'GET', headers: requestHeaders, signal });
+  const contextResponse = await api.fetch(contextRequest, env);
+  if (!contextResponse.ok) return contextResponse;
+  const context = await contextResponse.json();
+  const platform = context?.platform || {};
+  const access = context?.access || {};
+  const scope = { ...platform, ...access };
+  const isImport = request.method.toUpperCase() === 'POST' && path.endsWith('/import');
+  if (isImport && access.can_write !== true) {
+    return new Response(JSON.stringify({ ok: false, error: 'This platform membership is read-only', code: 'PLATFORM_WRITE_DENIED' }), { status: 403, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+  }
+  if (isImport && path.includes('/guide/') && access.can_upload_guides !== true) {
+    return new Response(JSON.stringify({ ok: false, error: 'Guide upload permission is required for this platform', code: 'GUIDE_UPLOAD_DENIED' }), { status: 403, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+  }
+  return handleBulkContentRoute(request, env, scope);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -272,15 +293,16 @@ const server = http.createServer(async (req, res) => {
       signal:requestAbort.signal,
       ...(body ? { duplex: 'half' } : {}),
     });
-    const response = await api.fetch(request, env);
+    const response = path.startsWith('/admin/content-bulk/')
+      ? await authenticatedBulkResponse(request, env, url, path, requestHeaders, requestAbort.signal)
+      : await api.fetch(request, env);
+    if (!response) throw Object.assign(new Error('Bulk content route was not found'), { status: 404 });
     const headers = Object.fromEntries(response.headers.entries());
     headers['x-request-id'] = requestId;
     headers['x-api-version'] = API_VERSION;
     headers['vary'] = 'Origin, Accept-Encoding';
     if (corsOrigin) headers['access-control-allow-origin'] = corsOrigin;
     else delete headers['access-control-allow-origin'];
-    // A platform query is part of the public resource identity. Do not let a
-    // shared edge cache serve another tenant's categories, guides, or FAQ.
     const hasPlatformContext = url.searchParams.has('platform');
     if (req.method === 'GET' && !hasPlatformContext && (publicCachePaths.has(path) || path.startsWith('/guides/'))) {
       headers['cache-control'] = 'public, max-age=60, stale-while-revalidate=600, stale-if-error=86400';
@@ -310,7 +332,7 @@ const server = http.createServer(async (req, res) => {
     res.end(responseBody);
   } catch (error) {
     const status = Number(error.status || 500);
-    jsonResponse(res, status, { ok: false, error: status >= 500 ? 'Service temporarily unavailable' : error.message, request_id: requestId, version: API_VERSION }, { 'Cache-Control': 'no-store', 'X-Request-ID': requestId, ...(corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {}) });
+    jsonResponse(res, status, { ok: false, error: status >= 500 ? 'Service temporarily unavailable' : error.message, code: error.code || undefined, request_id: requestId, version: API_VERSION }, { 'Cache-Control': 'no-store', 'X-Request-ID': requestId, ...(corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {}) });
     console.error(JSON.stringify({ level: 'error', request_id: requestId, method: req.method, path, status, duration_ms: Date.now() - started, message: error.message, stack: error.stack }));
     return;
   } finally {
