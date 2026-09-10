@@ -21,7 +21,7 @@ import { handleBulkContentRoute } from './bulk-content-studio.js';
 
 const env = getRuntimeEnv();
 // Carries forward the 1.18.2-ai-knowledge-library runtime contract while the edge release marker advances.
-const API_VERSION = '1.18.4-r1-bulk-cors-preflight';
+const API_VERSION = '1.18.4-r2-bulk-locale-schema-compat';
 const API_FEATURES = [
   'cs-workspace-shared-domain',
   'staff-self-profile-management',
@@ -173,7 +173,8 @@ const API_FEATURES = [
   'postgres-api-integration-tests',
   'faq-guide-bulk-content-studio',
   'guide-embedded-cell-image-import',
-  'bulk-content-cors-preflight'
+  'bulk-content-cors-preflight',
+  'bulk-content-locale-schema-compat'
 ];
 validateRuntimeEnv(env);
 env.GUIDE_IMAGES = createR2Adapter(env);
