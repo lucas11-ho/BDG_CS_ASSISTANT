@@ -13,7 +13,8 @@ import {
   syncStoredGuideLanguage,
 } from "@/lib/platform-guide-content";
 
-const IOS_FONT_STACK = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif';
+const IOS_FONT_STACK = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif';
+const SYSTEM_FONT_STACK = 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 export function PublicLayout({ children }: { children: ReactNode }) {
   const platformKey = getPlatformCacheKey();
@@ -44,16 +45,17 @@ export function PublicLayout({ children }: { children: ReactNode }) {
   const fontStack = rawFont === "ios-system"
     ? IOS_FONT_STACK
     : rawFont === "system"
-      ? 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+      ? SYSTEM_FONT_STACK
       : /^[A-Za-z0-9 ,'-]{1,120}$/.test(rawFont)
         ? `${rawFont}, ui-sans-serif, system-ui, sans-serif`
-        : 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+        : SYSTEM_FONT_STACK;
 
   const guideStyle = {
     ...(theme?.guide_background_url ? { backgroundImage: `url(${theme.guide_background_url})`, backgroundSize: "cover", backgroundAttachment: "fixed" } : {}),
     fontFamily: fontStack,
     ["--font-sans" as string]: fontStack,
     ["--font-display" as string]: fontStack,
+    ["--guide-runtime-font" as string]: fontStack,
     ...(theme?.guide_text_color ? { color: theme.guide_text_color } : {}),
     ...(theme?.guide_surface_color ? { ["--card" as string]: theme.guide_surface_color } : {}),
     ...(theme?.guide_card_radius ? { ["--radius" as string]: `${Math.max(8, Math.min(32, theme.guide_card_radius))}px` } : {}),
@@ -64,13 +66,28 @@ export function PublicLayout({ children }: { children: ReactNode }) {
     applyDocumentIdentity(identity);
   }, [identity]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    const previousSans = root.style.getPropertyValue("--font-sans");
+    const previousDisplay = root.style.getPropertyValue("--font-display");
+    const previousRuntime = root.style.getPropertyValue("--guide-runtime-font");
+    root.style.setProperty("--font-sans", fontStack);
+    root.style.setProperty("--font-display", fontStack);
+    root.style.setProperty("--guide-runtime-font", fontStack);
+    return () => {
+      if (previousSans) root.style.setProperty("--font-sans", previousSans); else root.style.removeProperty("--font-sans");
+      if (previousDisplay) root.style.setProperty("--font-display", previousDisplay); else root.style.removeProperty("--font-display");
+      if (previousRuntime) root.style.setProperty("--guide-runtime-font", previousRuntime); else root.style.removeProperty("--guide-runtime-font");
+    };
+  }, [fontStack]);
+
   const languages = experience?.supportedLanguages?.length
     ? experience.supportedLanguages
     : [{ code: String(getPublicLanguage() || "en"), label: "Language" }];
   const activeLanguage = experience?.effectiveLocale || getPublicLanguage();
 
   return (
-    <div className="min-h-screen bg-background text-foreground font-sans" style={guideStyle}>
+    <div className="guide-runtime-font min-h-screen bg-background text-foreground font-sans" style={guideStyle}>
       <PublicHeader
         platformKey={platformKey}
         platformName={platformName}
