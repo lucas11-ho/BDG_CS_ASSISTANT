@@ -2,22 +2,17 @@ import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tan
 import { useQuery } from "@tanstack/react-query";
 import { Search, X, Filter, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { api, getPlatformCacheKey, getPublicLanguage } from "@/lib/api";
+import { api, getPlatformCacheKey } from "@/lib/api";
+import { getPlatformGuideExperience, guideShellCopy } from "@/lib/platform-guide-content";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
 type GuideSearch = { q?: string; category?: string };
 
 export const Route = createFileRoute("/_public/guides")({
-  head: () => ({
-    meta: [
-      { title: "Guides — Help Center" },
-      { name: "description", content: "Browse guides and tutorials for deposits, withdrawals, account help, and more." },
-    ],
-  }),
-  validateSearch: (s: Record<string, unknown>): GuideSearch => ({
-    q: typeof s.q === "string" ? s.q : undefined,
-    category: typeof s.category === "string" ? s.category : undefined,
+  validateSearch: (search: Record<string, unknown>): GuideSearch => ({
+    q: typeof search.q === "string" ? search.q : undefined,
+    category: typeof search.category === "string" ? search.category : undefined,
   }),
   component: Guides,
 });
@@ -33,9 +28,16 @@ function GuidesIndex() {
   const { q, category } = Route.useSearch();
   const navigate = useNavigate({ from: "/guides" });
   const [text, setText] = useState(q ?? "");
-  const lang = getPublicLanguage();
   const platformKey = getPlatformCacheKey();
-  const copy = lang === "hi" ? { title: "गाइड और ट्यूटोरियल", subtitle: "इस प्लेटफ़ॉर्म के लिए चरण-दर-चरण सहायता।", search: "गाइड खोजें…", all: "सभी", loading: "गाइड लोड हो रहे हैं…", error: "गाइड सेवा से कनेक्ट नहीं हो सका। आपकी प्रकाशित सामग्री सुरक्षित है।", retry: "फिर कोशिश करें", empty: "कोई परिणाम नहीं मिला। दूसरा keyword आज़माएँ।", updated: "अपडेट" } : { title: "Guides & tutorials", subtitle: "Step-by-step help for this platform.", search: "Search guides…", all: "All", loading: "Loading guides…", error: "Unable to connect to this platform's guide service. Published content is still safe.", retry: "Try again", empty: "No results found. Try a different keyword.", updated: "Updated" };
+  const experience = useQuery({
+    queryKey: ["platform-guide-experience", platformKey],
+    queryFn: getPlatformGuideExperience,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+  const copy = experience.data ? guideShellCopy(experience.data) : null;
+  const lang = experience.data?.effectiveLocale || "en";
+
   useEffect(() => setText(q ?? ""), [q]);
 
   const cats = useQuery({ queryKey: ["categories", platformKey], queryFn: api.getCategories });
@@ -47,22 +49,22 @@ function GuidesIndex() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="font-display text-2xl font-bold md:text-3xl">{copy.title}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{copy.subtitle}</p>
+        <h1 className="font-display text-2xl font-bold md:text-3xl">{copy?.guidesPageTitle || "Guides & tutorials"}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{copy?.guidesPageSubtitle || "Step-by-step help for this platform."}</p>
       </header>
 
       <form
         className="relative"
-        onSubmit={(e) => {
-          e.preventDefault();
-          navigate({ search: (p: any) => ({ ...p, q: text || undefined }) });
+        onSubmit={(event) => {
+          event.preventDefault();
+          navigate({ search: (previous: any) => ({ ...previous, q: text || undefined }) });
         }}
       >
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={copy.search}
+          onChange={(event) => setText(event.target.value)}
+          placeholder={copy?.guidesSearchPlaceholder || "Search guides…"}
           className="h-11 rounded-xl pl-9 pr-10"
         />
         {text && (
@@ -70,7 +72,7 @@ function GuidesIndex() {
             type="button"
             onClick={() => {
               setText("");
-              navigate({ search: (p: any) => ({ ...p, q: undefined }) });
+              navigate({ search: (previous: any) => ({ ...previous, q: undefined }) });
             }}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             aria-label="Clear search"
@@ -82,59 +84,53 @@ function GuidesIndex() {
 
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
         <Filter className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <FilterChip active={!category} onClick={() => navigate({ search: (p: any) => ({ ...p, category: undefined }) })}>
-          {copy.all}
+        <FilterChip active={!category} onClick={() => navigate({ search: (previous: any) => ({ ...previous, category: undefined }) })}>
+          {copy?.guidesAllLabel || "All"}
         </FilterChip>
-        {cats.data?.map((c) => (
+        {cats.data?.map((item) => (
           <FilterChip
-            key={c.id}
-            active={category === c.slug}
-            onClick={() => navigate({ search: (p: any) => ({ ...p, category: c.slug }) })}
+            key={item.id}
+            active={category === item.slug}
+            onClick={() => navigate({ search: (previous: any) => ({ ...previous, category: item.slug }) })}
           >
-            {c.name}
+            {item.name}
           </FilterChip>
         ))}
       </div>
 
       {isLoading && (
         <div className="flex items-center justify-center py-16 text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {copy.loading}
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {copy?.guidesLoadingText || "Loading guides…"}
         </div>
       )}
 
       {isError && (
         <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-6 text-center">
-          <p className="text-sm text-destructive">{copy.error}</p>
-          <button className="mt-2 text-sm font-medium underline" onClick={() => refetch()}>
-            {copy.retry}
-          </button>
+          <p className="text-sm text-destructive">{copy?.guidesErrorText || "Unable to connect to this platform's guide service."}</p>
+          <button className="mt-2 text-sm font-medium underline" onClick={() => refetch()}>{copy?.guidesRetryText || "Try again"}</button>
         </div>
       )}
 
       {!isLoading && !isError && data?.length === 0 && (
         <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-          {copy.empty}
+          {copy?.guidesEmptyText || "No results found. Try a different keyword."}
         </div>
       )}
 
       <div className="grid gap-3 md:grid-cols-2">
-        {data?.map((g) => (
+        {data?.map((guide) => (
           <Link
-            key={g.id}
+            key={guide.id}
             to="/guides/$slug"
-            params={{ slug: g.slug }}
+            params={{ slug: guide.slug }}
             className="group flex overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-card)] transition-transform hover:-translate-y-0.5"
           >
-            {g.cover ? (
-              <div className="h-28 w-28 shrink-0 overflow-hidden bg-muted">
-                <img src={g.cover} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
-              </div>
-            ) : null}
+            {guide.cover ? <div className="h-28 w-28 shrink-0 overflow-hidden bg-muted"><img src={guide.cover} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" /></div> : null}
             <div className="min-w-0 flex-1 p-3">
-              <Badge variant="secondary" className="text-[10px] uppercase">{g.category}</Badge>
-              <h3 className="mt-1 line-clamp-1 font-display text-sm font-semibold">{g.title}</h3>
-              <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{g.summary}</p>
-              <div className="mt-2 text-[10px] text-muted-foreground">{copy.updated} {g.updatedAt}</div>
+              <Badge variant="secondary" className="text-[10px] uppercase">{guide.category}</Badge>
+              <h3 className="mt-1 line-clamp-1 font-display text-sm font-semibold">{guide.title}</h3>
+              <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{guide.summary}</p>
+              <div className="mt-2 text-[10px] text-muted-foreground">{copy?.guidesUpdatedLabel || "Updated"} {guide.updatedAt}</div>
             </div>
           </Link>
         ))}
