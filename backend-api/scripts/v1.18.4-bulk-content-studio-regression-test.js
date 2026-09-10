@@ -84,10 +84,19 @@ await test('Bulk content CORS preflight bypasses authenticated platform lookup',
   assert.ok(server.includes("'bulk-content-cors-preflight'"));
 });
 
-await test('Production gating waits for the v1.18.4-r1 hotfix release marker', async () => {
+await test('Platform locale ordering schema matches the bulk locale-policy query', async () => {
+  const source = fs.readFileSync(new URL('../src/bulk-content-studio.js', import.meta.url), 'utf8');
+  const migration = fs.readFileSync(new URL('../migrations/050_v1.18.4_r2_platform_locale_sort_order.sql', import.meta.url), 'utf8');
+  assert.ok(source.includes('ORDER BY is_default DESC, sort_order ASC, id ASC'));
+  assert.ok(migration.includes('ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 100'));
+  assert.ok(migration.includes('idx_platform_locales_enabled_order'));
+});
+
+await test('Production gating waits for the v1.18.4-r2 schema compatibility release marker', async () => {
   const server = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
   const reader = fs.readFileSync(new URL('../../scripts/ci/read-api-version.mjs', import.meta.url), 'utf8');
-  assert.ok(server.includes("const API_VERSION = '1.18.4-r1-bulk-cors-preflight'"));
+  assert.ok(server.includes("const API_VERSION = '1.18.4-r2-bulk-locale-schema-compat'"));
+  assert.ok(server.includes("'bulk-content-locale-schema-compat'"));
   assert.ok(server.includes('version: API_VERSION'));
   assert.ok(reader.includes('backend-api/src/server.js'));
   assert.ok(!reader.includes('backend-api/src/core.js'));
