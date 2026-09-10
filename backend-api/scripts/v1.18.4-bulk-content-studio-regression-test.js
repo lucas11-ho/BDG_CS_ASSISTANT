@@ -78,4 +78,13 @@ await test('Guide runtime has an explicit Apple-style typography override hook',
   assert.ok(styles.includes('.guide-runtime-font'));
 });
 
+await test('Production gating waits for the v1.18.4 edge release marker', async () => {
+  const server = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+  const reader = fs.readFileSync(new URL('../../scripts/ci/read-api-version.mjs', import.meta.url), 'utf8');
+  assert.ok(server.includes("const API_VERSION = '1.18.4-guide-faq-bulk-content'"));
+  assert.ok(server.includes('version: API_VERSION'));
+  assert.ok(reader.includes('backend-api/src/server.js'));
+  assert.ok(!reader.includes('backend-api/src/core.js'));
+});
+
 console.log(`${passed}/${passed} v1.18.4 bulk content studio checks passed.`);
