@@ -29,7 +29,7 @@ const runtimes = [
 ];
 
 test('Admin Guide editor stores platform-localized fields', () => {
-  assert.ok(adminTheme.includes('guide.i18n.${locale}.${field.key}'));
+  assert.ok(adminTheme.includes('guide.i18n.${locale}.${field}'));
   assert.ok(adminTheme.includes('default_locale'));
   assert.ok(adminTheme.includes('supported_languages'));
 });
@@ -41,25 +41,26 @@ test('Admin Web Identity supports all four surfaces', () => {
 
 test('Guide offers native iOS/Apple system typography', () => {
   assert.ok(adminTheme.includes('ios-system'));
-  assert.ok(adminTheme.includes('-apple-system'));
+  assert.ok(guideLayout.includes('-apple-system'));
+  assert.ok(guideLayout.includes('BlinkMacSystemFont'));
   assert.ok(!adminTheme.includes('.ttf') && !adminTheme.includes('.otf'));
 });
 
 test('Guide localization helper implements selected-default-legacy fallback', () => {
-  assert.ok(guideContent.includes('guide.i18n.${locale}.${field}'));
-  assert.ok(guideContent.includes('defaultLocale'));
+  assert.ok(guideContent.includes('guide.i18n.${current}.${field}'));
+  assert.ok(guideContent.includes('guide.i18n.${defaultLocale}.${field}'));
   assert.ok(guideContent.includes('legacyKey'));
 });
 
 test('Guide public surfaces consume platform localization', () => {
   for (const source of [guideLayout, guideHome, guideList, guideFaq]) {
-    assert.ok(source.includes('platform-guide-content') || source.includes('usePlatformGuideContent'));
+    assert.ok(source.includes('platform-guide-content') || source.includes('guideShellCopy'));
   }
 });
 
 for (const [kind, worker] of workers) {
   test(`${kind} edge worker resolves platform Web Identity`, () => {
-    assert.ok(worker.includes(`/guide/content`));
+    assert.ok(worker.includes('/guide/content'));
     assert.ok(worker.includes('/__platform/identity'));
     assert.ok(worker.includes('X-Forwarded-Host'));
     assert.ok(worker.includes('x-platform-web-identity'));
