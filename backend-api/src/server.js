@@ -21,7 +21,7 @@ import { handleBulkContentRoute } from './bulk-content-studio.js';
 
 const env = getRuntimeEnv();
 // Carries forward the 1.18.2-ai-knowledge-library runtime contract while the edge release marker advances.
-const API_VERSION = '1.18.4-guide-faq-bulk-content';
+const API_VERSION = '1.18.4-r1-bulk-cors-preflight';
 const API_FEATURES = [
   'cs-workspace-shared-domain',
   'staff-self-profile-management',
@@ -172,7 +172,8 @@ const API_FEATURES = [
   'connector-dns-ssrf-guard',
   'postgres-api-integration-tests',
   'faq-guide-bulk-content-studio',
-  'guide-embedded-cell-image-import'
+  'guide-embedded-cell-image-import',
+  'bulk-content-cors-preflight'
 ];
 validateRuntimeEnv(env);
 env.GUIDE_IMAGES = createR2Adapter(env);
@@ -294,7 +295,7 @@ const server = http.createServer(async (req, res) => {
       signal:requestAbort.signal,
       ...(body ? { duplex: 'half' } : {}),
     });
-    const response = path.startsWith('/admin/content-bulk/')
+    const response = path.startsWith('/admin/content-bulk/') && request.method.toUpperCase() !== 'OPTIONS'
       ? await authenticatedBulkResponse(request, env, url, path, requestHeaders, requestAbort.signal)
       : await api.fetch(request, env);
     if (!response) throw Object.assign(new Error('Bulk content route was not found'), { status: 404 });
