@@ -35,6 +35,13 @@ export type DataPageProps<T extends { id: number | string; status?: string }> = 
   statusFilterKey?: string;
   enableDuplicateCleanup?: boolean;
   enableDeleteAll?: boolean;
+  readOnly?: boolean;
+  canCreate?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canSelect?: boolean;
+  showStatusFilter?: boolean;
+  onExport?: (rows: T[]) => void | Promise<void>;
 };
 
 function displayStatus(value?: string) {
@@ -65,6 +72,13 @@ export default function DataPage<T extends { id: number | string; status?: strin
   createLabel = "Create",
   enableDuplicateCleanup = false,
   enableDeleteAll = false,
+  readOnly = false,
+  canCreate = true,
+  canEdit = true,
+  canDelete = true,
+  canSelect = true,
+  showStatusFilter = true,
+  onExport,
 }: DataPageProps<T>) {
   const { t } = useAdminI18n();
   const [rows, setRows] = useState<T[]>([]);
@@ -77,6 +91,10 @@ export default function DataPage<T extends { id: number | string; status?: strin
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [pageSize, setPageSize] = useState(20);
   const [form] = Form.useForm();
+  const allowCreate = !readOnly && canCreate;
+  const allowEdit = !readOnly && canEdit;
+  const allowDelete = !readOnly && canDelete;
+  const allowSelect = !readOnly && canSelect && allowDelete;
 
   const load = async () => {
     setLoading(true);
@@ -137,6 +155,14 @@ export default function DataPage<T extends { id: number | string; status?: strin
     message.success(t(`Deleted ${res?.deleted ?? 0} quick replies`));
     load();
   };
+  const exportRows = async () => {
+    if (!onExport) return;
+    try {
+      await onExport(filtered);
+    } catch (e: any) {
+      message.error(e?.message || t("Export failed"));
+    }
+  };
   const save = async () => {
     const values = await form.validateFields();
     if (editing) {
@@ -153,22 +179,26 @@ export default function DataPage<T extends { id: number | string; status?: strin
 
   const cols: ColumnsType<T> = [
     ...columns.map((column: any) => ({ ...column, title: typeof column.title === "string" ? t(column.title) : column.title })),
-    {
+    ...((allowEdit || allowDelete) ? [{
       title: t("Actions"),
       key: "_actions",
       width: 140,
-      render: (_, row) => (
+      render: (_: unknown, row: T) => (
         <Space>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
-            {t("Edit")}
-          </Button>
-          <Popconfirm title={t("Delete this item?")} onConfirm={() => remove(row)} okText={t("Delete")} cancelText={t("Cancel")} okButtonProps={{ danger: true }}>
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          {allowEdit ? (
+            <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
+              {t("Edit")}
+            </Button>
+          ) : null}
+          {allowDelete ? (
+            <Popconfirm title={t("Delete this item?")} onConfirm={() => remove(row)} okText={t("Delete")} cancelText={t("Cancel")} okButtonProps={{ danger: true }}>
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          ) : null}
         </Space>
       ),
-    },
-  ];
+    }] : []),
+  ] as ColumnsType<T>;
 
   return (
     <>
@@ -181,20 +211,22 @@ export default function DataPage<T extends { id: number | string; status?: strin
           onChange={(e) => setSearch(e.target.value)}
           style={{ width: 260 }}
         />
-        <Select
-          allowClear
-          placeholder={t("Status")}
-          value={statusFilter}
-          onChange={setStatusFilter}
-          style={{ width: 160 }}
-          options={[
-            { value: "active", label: t("Active") },
-            { value: "inactive", label: t("Inactive") },
-            { value: "published", label: t("Published") },
-            { value: "draft", label: t("Draft") },
-            { value: "pending", label: t("Pending") },
-          ]}
-        />
+        {showStatusFilter ? (
+          <Select
+            allowClear
+            placeholder={t("Status")}
+            value={statusFilter}
+            onChange={setStatusFilter}
+            style={{ width: 160 }}
+            options={[
+              { value: "active", label: t("Active") },
+              { value: "inactive", label: t("Inactive") },
+              { value: "published", label: t("Published") },
+              { value: "draft", label: t("Draft") },
+              { value: "pending", label: t("Pending") },
+            ]}
+          />
+        ) : null}
         <Select
           value={pageSize}
           onChange={setPageSize}
@@ -203,12 +235,12 @@ export default function DataPage<T extends { id: number | string; status?: strin
         />
         <div style={{ flex: 1 }} />
         <Space wrap>
-          {selectedRowKeys.length > 0 && <Popconfirm title={t(`Delete ${selectedRowKeys.length} selected record(s)?`)} onConfirm={bulkDelete} okText={t("Delete")} cancelText={t("Cancel")} okButtonProps={{ danger: true }}><Button danger icon={<DeleteOutlined />}>{t("Delete selected")}</Button></Popconfirm>}
-          {enableDuplicateCleanup && <Button icon={<ClearOutlined />} onClick={cleanupDuplicates}>{t("Remove duplicates")}</Button>}
-          {enableDeleteAll && <Popconfirm title={t("Delete ALL quick replies?")} onConfirm={deleteAllQuickReplies} okText={t("Delete")} cancelText={t("Cancel")} okButtonProps={{ danger: true }}><Button danger>{t("Delete all")}</Button></Popconfirm>}
+          {allowDelete && selectedRowKeys.length > 0 && <Popconfirm title={t(`Delete ${selectedRowKeys.length} selected record(s)?`)} onConfirm={bulkDelete} okText={t("Delete")} cancelText={t("Cancel")} okButtonProps={{ danger: true }}><Button danger icon={<DeleteOutlined />}>{t("Delete selected")}</Button></Popconfirm>}
+          {!readOnly && enableDuplicateCleanup && <Button icon={<ClearOutlined />} onClick={cleanupDuplicates}>{t("Remove duplicates")}</Button>}
+          {!readOnly && enableDeleteAll && <Popconfirm title={t("Delete ALL quick replies?")} onConfirm={deleteAllQuickReplies} okText={t("Delete")} cancelText={t("Cancel")} okButtonProps={{ danger: true }}><Button danger>{t("Delete all")}</Button></Popconfirm>}
           <Button icon={<ReloadOutlined />} onClick={load}>{t("Refresh")}</Button>
-          <Button icon={<ExportOutlined />}>{t("Export")}</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t(createLabel)}</Button>
+          {onExport ? <Button icon={<ExportOutlined />} onClick={exportRows}>{t("Export")}</Button> : null}
+          {allowCreate ? <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t(createLabel)}</Button> : null}
         </Space>
       </div>
 
@@ -226,7 +258,7 @@ export default function DataPage<T extends { id: number | string; status?: strin
         <Table
           className="bdg-table"
           rowKey="id"
-          rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
+          rowSelection={allowSelect ? { selectedRowKeys, onChange: setSelectedRowKeys } : undefined}
           columns={cols}
           dataSource={filtered}
           size="middle"
