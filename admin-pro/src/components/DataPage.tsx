@@ -25,6 +25,7 @@ import {
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { api } from "@/lib/api";
+import { useAdminI18n } from "@/i18n/runtime";
 
 export type DataPageProps<T extends { id: number | string; status?: string }> = {
   resource: string;
@@ -36,7 +37,13 @@ export type DataPageProps<T extends { id: number | string; status?: string }> = 
   enableDeleteAll?: boolean;
 };
 
+function displayStatus(value?: string) {
+  const raw = String(value || "").replaceAll("_", " ").trim();
+  return raw ? raw.replace(/(^|\s)\S/g, (char) => char.toUpperCase()) : raw;
+}
+
 export function StatusTag({ value }: { value?: string }) {
+  const { t } = useAdminI18n();
   const v = (value || "").toLowerCase();
   const color =
     v === "active" || v === "operational" || v === "published" || v === "indexed"
@@ -48,7 +55,7 @@ export function StatusTag({ value }: { value?: string }) {
       : v === "error"
       ? "error"
       : "processing";
-  return <Tag color={color as any} style={{ textTransform: "capitalize", margin: 0 }}>{value}</Tag>;
+  return <Tag color={color as any} style={{ margin: 0 }}>{t(displayStatus(value))}</Tag>;
 }
 
 export default function DataPage<T extends { id: number | string; status?: string }>({
@@ -59,6 +66,7 @@ export default function DataPage<T extends { id: number | string; status?: strin
   enableDuplicateCleanup = false,
   enableDeleteAll = false,
 }: DataPageProps<T>) {
+  const { t } = useAdminI18n();
   const [rows, setRows] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +86,7 @@ export default function DataPage<T extends { id: number | string; status?: strin
       setRows(data);
       setSelectedRowKeys([]);
     } catch (e: any) {
-      setError(e?.message ?? "Failed to load data");
+      setError(e?.message ?? t("Failed to load data"));
     } finally {
       setLoading(false);
     }
@@ -110,23 +118,23 @@ export default function DataPage<T extends { id: number | string; status?: strin
     await api.remove(resource, row.id);
     setRows((r) => r.filter((x) => x.id !== row.id));
     setSelectedRowKeys((keys) => keys.filter((k) => k !== row.id));
-    message.success("Deleted");
+    message.success(t("Deleted"));
   };
   const bulkDelete = async () => {
-    if (!selectedRowKeys.length) return message.warning("Select records first");
+    if (!selectedRowKeys.length) return message.warning(t("Select records first"));
     await api.bulkRemove(resource, selectedRowKeys as any[]);
     setRows((r) => r.filter((x) => !selectedRowKeys.includes(x.id)));
-    message.success(`Deleted ${selectedRowKeys.length} selected record(s)`);
+    message.success(t(`Deleted ${selectedRowKeys.length} selected record(s)`));
     setSelectedRowKeys([]);
   };
   const cleanupDuplicates = async () => {
     const res: any = await api.cleanupQuickReplyDuplicates();
-    message.success(`Removed ${res?.deleted ?? 0} duplicate quick replies`);
+    message.success(t(`Removed ${res?.deleted ?? 0} duplicate quick replies`));
     load();
   };
   const deleteAllQuickReplies = async () => {
     const res: any = await api.deleteAllQuickReplies();
-    message.success(`Deleted ${res?.deleted ?? 0} quick replies`);
+    message.success(t(`Deleted ${res?.deleted ?? 0} quick replies`));
     load();
   };
   const save = async () => {
@@ -134,27 +142,27 @@ export default function DataPage<T extends { id: number | string; status?: strin
     if (editing) {
       const updated = await api.update(resource, editing.id, values);
       setRows((r) => r.map((x) => (x.id === editing.id ? { ...x, ...(updated as any) } : x)));
-      message.success("Updated");
+      message.success(t("Updated"));
     } else {
       const created = (await api.create(resource, values)) as T;
       setRows((r) => [created, ...r]);
-      message.success("Created");
+      message.success(t("Created"));
     }
     setDrawerOpen(false);
   };
 
   const cols: ColumnsType<T> = [
-    ...columns,
+    ...columns.map((column: any) => ({ ...column, title: typeof column.title === "string" ? t(column.title) : column.title })),
     {
-      title: "Actions",
+      title: t("Actions"),
       key: "_actions",
       width: 140,
       render: (_, row) => (
         <Space>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
-            Edit
+            {t("Edit")}
           </Button>
-          <Popconfirm title="Delete this item?" onConfirm={() => remove(row)} okText="Delete" okButtonProps={{ danger: true }}>
+          <Popconfirm title={t("Delete this item?")} onConfirm={() => remove(row)} okText={t("Delete")} cancelText={t("Cancel")} okButtonProps={{ danger: true }}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
@@ -168,39 +176,39 @@ export default function DataPage<T extends { id: number | string; status?: strin
         <Input
           allowClear
           prefix={<SearchOutlined />}
-          placeholder="Search..."
+          placeholder={t("Search...")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ width: 260 }}
         />
         <Select
           allowClear
-          placeholder="Status"
+          placeholder={t("Status")}
           value={statusFilter}
           onChange={setStatusFilter}
           style={{ width: 160 }}
           options={[
-            { value: "active", label: "Active" },
-            { value: "inactive", label: "Inactive" },
-            { value: "published", label: "Published" },
-            { value: "draft", label: "Draft" },
-            { value: "pending", label: "Pending" },
+            { value: "active", label: t("Active") },
+            { value: "inactive", label: t("Inactive") },
+            { value: "published", label: t("Published") },
+            { value: "draft", label: t("Draft") },
+            { value: "pending", label: t("Pending") },
           ]}
         />
         <Select
           value={pageSize}
           onChange={setPageSize}
           style={{ width: 120 }}
-          options={[20, 50, 100].map((n) => ({ value: n, label: `${n} / page` }))}
+          options={[20, 50, 100].map((n) => ({ value: n, label: t(`${n} / page`) }))}
         />
         <div style={{ flex: 1 }} />
         <Space wrap>
-          {selectedRowKeys.length > 0 && <Popconfirm title={`Delete ${selectedRowKeys.length} selected record(s)?`} onConfirm={bulkDelete} okButtonProps={{ danger: true }}><Button danger icon={<DeleteOutlined />}>Delete selected</Button></Popconfirm>}
-          {enableDuplicateCleanup && <Button icon={<ClearOutlined />} onClick={cleanupDuplicates}>Remove duplicates</Button>}
-          {enableDeleteAll && <Popconfirm title="Delete ALL quick replies?" onConfirm={deleteAllQuickReplies} okButtonProps={{ danger: true }}><Button danger>Delete all</Button></Popconfirm>}
-          <Button icon={<ReloadOutlined />} onClick={load}>Refresh</Button>
-          <Button icon={<ExportOutlined />}>Export</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{createLabel}</Button>
+          {selectedRowKeys.length > 0 && <Popconfirm title={t(`Delete ${selectedRowKeys.length} selected record(s)?`)} onConfirm={bulkDelete} okText={t("Delete")} cancelText={t("Cancel")} okButtonProps={{ danger: true }}><Button danger icon={<DeleteOutlined />}>{t("Delete selected")}</Button></Popconfirm>}
+          {enableDuplicateCleanup && <Button icon={<ClearOutlined />} onClick={cleanupDuplicates}>{t("Remove duplicates")}</Button>}
+          {enableDeleteAll && <Popconfirm title={t("Delete ALL quick replies?")} onConfirm={deleteAllQuickReplies} okText={t("Delete")} cancelText={t("Cancel")} okButtonProps={{ danger: true }}><Button danger>{t("Delete all")}</Button></Popconfirm>}
+          <Button icon={<ReloadOutlined />} onClick={load}>{t("Refresh")}</Button>
+          <Button icon={<ExportOutlined />}>{t("Export")}</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t(createLabel)}</Button>
         </Space>
       </div>
 
@@ -212,7 +220,7 @@ export default function DataPage<T extends { id: number | string; status?: strin
         </div>
       ) : filtered.length === 0 ? (
         <div style={{ padding: 40, background: "var(--navy-800)", border: "1px solid var(--border-dim)", borderRadius: 8 }}>
-          <Empty description={<span style={{ color: "#8ea0bd" }}>No records found</span>} />
+          <Empty description={<span style={{ color: "#8ea0bd" }}>{t("No records found")}</span>} />
         </div>
       ) : (
         <Table
@@ -222,21 +230,21 @@ export default function DataPage<T extends { id: number | string; status?: strin
           columns={cols}
           dataSource={filtered}
           size="middle"
-          pagination={{ pageSize, showSizeChanger: false, showTotal: (t) => `${t} records` }}
+          pagination={{ pageSize, showSizeChanger: false, showTotal: (total) => t(`${total} records`) }}
         />
       )}
 
       <Drawer
-        title={editing ? "Edit record" : createLabel}
+        title={editing ? t("Edit record") : t(createLabel)}
         width={480}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        extra={<Space><Button onClick={() => setDrawerOpen(false)}>Cancel</Button><Button type="primary" onClick={save}>Save</Button></Space>}
+        extra={<Space><Button onClick={() => setDrawerOpen(false)}>{t("Cancel")}</Button><Button type="primary" onClick={save}>{t("Save")}</Button></Space>}
       >
         <Form layout="vertical" form={form}>
-          {editableFields.map((f) => (
-            <Form.Item key={f.name} label={f.label} name={f.name} extra={f.help} rules={f.required === false ? [] : [{ required: true, message: `${f.label} required` }]}>
-              {f.type === "textarea" ? <Input.TextArea rows={f.rows || 4} /> : f.type === "select" ? <Select options={(f.options || []).map((o) => ({ value: o, label: o }))} /> : f.type === "number" ? <Input type="number" /> : <Input />}
+          {editableFields.map((field) => (
+            <Form.Item key={field.name} label={t(field.label)} name={field.name} extra={field.help ? t(field.help) : undefined} rules={field.required === false ? [] : [{ required: true, message: t(`${field.label} required`) }]}>
+              {field.type === "textarea" ? <Input.TextArea rows={field.rows || 4} /> : field.type === "select" ? <Select options={(field.options || []).map((option) => ({ value: option, label: t(displayStatus(option)) }))} /> : field.type === "number" ? <Input type="number" /> : <Input />}
             </Form.Item>
           ))}
         </Form>
