@@ -1,104 +1,312 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Button, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, message } from "antd";
-import { DeleteOutlined, EditOutlined, KeyOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, message } from "antd";
+import {
+  DeleteOutlined,
+  EditOutlined,
+  KeyOutlined,
+  LogoutOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SafetyCertificateOutlined,
+} from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { api, getActiveAdminPlatformRoute } from "@/lib/api";
+import { api, getActiveAdminPlatformRoute, getCurrentUser } from "@/lib/api";
+import { useAdminI18n } from "@/i18n/runtime";
 
 export const Route = createFileRoute("/_admin/admin-users")({ component: AdminUsersPage });
 
-type AdminUser = { id: number | string; name: string; email: string; role: string; status: string; lastLogin?: string; twofa_enabled?: boolean; session_version?: number };
+type AdminUser = {
+  id: number | string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  lastLogin?: string;
+  twofa_enabled?: boolean;
+};
 
 function AdminUsersPage() {
+  const { t } = useAdminI18n();
   const [rows, setRows] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [passwordUser, setPasswordUser] = useState<AdminUser | null>(null);
+  const [resetUser, setResetUser] = useState<AdminUser | null>(null);
   const [form] = Form.useForm();
   const [passwordForm] = Form.useForm();
+  const [resetForm] = Form.useForm();
+  const platformContext = Boolean(getActiveAdminPlatformRoute());
+  const currentUser = getCurrentUser();
 
   const load = async () => {
     setLoading(true);
-    try { setRows((await api.list("admin-users")) as AdminUser[]); }
-    catch (e: any) { message.error(e?.message || "Failed to load admins"); }
-    finally { setLoading(false); }
+    try {
+      setRows((await api.list("admin-users")) as AdminUser[]);
+    } catch (error: any) {
+      message.error(error?.message || t("Failed to load admins"));
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    load();
+  }, []);
 
   const create = () => {
     setEditing(null);
     form.resetFields();
-    form.setFieldsValue({ role: getActiveAdminPlatformRoute() ? "platform_admin" : "admin", status: "active" });
+    form.setFieldsValue({ role: platformContext ? "platform_admin" : "admin", status: "active" });
     setOpen(true);
   };
+
   const edit = (row: AdminUser) => {
     setEditing(row);
     form.setFieldsValue(row);
     setOpen(true);
   };
+
   const save = async () => {
-    const values = await form.validateFields();
-    if (editing) await api.update("admin-users", editing.id, values);
-    else await api.create("admin-users", values);
-    message.success(editing ? "Admin updated" : "Admin created");
-    setOpen(false);
-    load();
+    try {
+      const values = await form.validateFields();
+      if (editing) await api.update("admin-users", editing.id, values);
+      else await api.create("admin-users", values);
+      message.success(t(editing ? "Admin updated" : "Admin created"));
+      setOpen(false);
+      await load();
+    } catch (error: any) {
+      if (error?.errorFields) return;
+      message.error(error?.message || t("Unable to save administrator"));
+    }
   };
+
   const changePassword = async () => {
-    const values = await passwordForm.validateFields();
-    if (values.password !== values.confirm_password) return message.error("Passwords do not match");
-    await api.changeAdminPassword(passwordUser!.id, values.password);
-    message.success("Password changed");
-    setPasswordOpen(false);
+    try {
+      const values = await passwordForm.validateFields();
+      if (values.password !== values.confirm_password) {
+        message.error(t("Passwords do not match"));
+        return;
+      }
+      await api.changeAdminPassword(passwordUser!.id, values.password);
+      message.success(t("Password changed and existing sessions revoked"));
+      setPasswordOpen(false);
+      await load();
+    } catch (error: any) {
+      if (error?.errorFields) return;
+      message.error(error?.message || t("Unable to change password"));
+    }
+  };
+
+  const forceLogout = async (row: AdminUser) => {
+    try {
+      await api.forceLogoutAdmin(row.id);
+      message.success(t("All active sessions were revoked"));
+      await load();
+    } catch (error: any) {
+      message.error(error?.message || t("Unable to force logout"));
+    }
+  };
+
+  const openReset2FA = (row: AdminUser) => {
+    setResetUser(row);
+    resetForm.resetFields();
+    setResetOpen(true);
+  };
+
+  const reset2FA = async () => {
+    try {
+      const values = await resetForm.validateFields();
+      await api.resetAdmin2FA(resetUser!.id, values.owner_code || "");
+      message.success(t("2FA was reset and all sessions were revoked"));
+      setResetOpen(false);
+      await load();
+    } catch (error: any) {
+      if (error?.errorFields) return;
+      message.error(error?.message || t("Unable to reset 2FA"));
+    }
   };
 
   const columns: ColumnsType<AdminUser> = [
-    { title: "Name", dataIndex: "name" },
-    { title: "Email", dataIndex: "email" },
-    { title: "Role", dataIndex: "role", width: 120, render: (v) => <Tag color={v === "owner" ? "gold" : "blue"}>{v}</Tag> },
-    { title: "Status", dataIndex: "status", width: 120, render: (v) => <Tag color={v === "active" ? "green" : "default"}>{v}</Tag> },
-    { title: "2FA", dataIndex: "twofa_enabled", width: 100, render: (v) => <Tag color={v ? "green" : "orange"}>{v ? "ON" : "OFF"}</Tag> },
-    { title: "Session", dataIndex: "session_version", width: 90 },
-    { title: "Last login", dataIndex: "lastLogin", width: 190 },
-    { title: "Actions", width: 430, render: (_, row) => <Space>
-      <Button size="small" icon={<EditOutlined />} onClick={() => edit(row)}>Edit</Button>
-      <Button size="small" icon={<KeyOutlined />} onClick={() => { setPasswordUser(row); passwordForm.resetFields(); setPasswordOpen(true); }}>Password</Button>
-      <Button size="small" onClick={() => api.forceLogoutAdmin(row.id).then(() => { message.success("Admin logged out"); load(); })}>Force logout</Button>
-      <Button size="small" onClick={() => api.resetAdmin2FA(row.id).then(() => { message.success("2FA reset"); load(); })}>Reset 2FA</Button>
-      {row.role !== "owner" && <Popconfirm title="Delete this admin?" onConfirm={() => api.remove("admin-users", row.id).then(load)} okButtonProps={{ danger: true }}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm>}
-    </Space> },
+    { title: t("Name"), dataIndex: "name" },
+    { title: t("Email"), dataIndex: "email" },
+    {
+      title: t("Role"),
+      dataIndex: "role",
+      width: 140,
+      render: (value) => <Tag color={value === "owner" ? "gold" : "blue"}>{String(value).replaceAll("_", " ")}</Tag>,
+    },
+    {
+      title: t("Status"),
+      dataIndex: "status",
+      width: 110,
+      render: (value) => <Tag color={value === "active" ? "green" : "default"}>{t(value)}</Tag>,
+    },
+    {
+      title: t("2FA"),
+      dataIndex: "twofa_enabled",
+      width: 110,
+      render: (value) => <Tag color={value ? "green" : "orange"}>{t(value ? "Enabled" : "Disabled")}</Tag>,
+    },
+    { title: t("Last login"), dataIndex: "lastLogin", width: 190, render: (value) => value || "—" },
+    {
+      title: t("Actions"),
+      width: platformContext ? 260 : 520,
+      render: (_, row) => {
+        const isSelf = String(row.email || "").toLowerCase() === String(currentUser?.email || "").toLowerCase();
+        return (
+          <Space wrap>
+            <Button size="small" icon={<EditOutlined />} onClick={() => edit(row)}>{t("Edit")}</Button>
+            <Button
+              size="small"
+              icon={<KeyOutlined />}
+              onClick={() => {
+                setPasswordUser(row);
+                passwordForm.resetFields();
+                setPasswordOpen(true);
+              }}
+            >
+              {t("Password")}
+            </Button>
+            {!platformContext && !isSelf ? (
+              <>
+                <Popconfirm
+                  title={t("Force logout this administrator?")}
+                  description={t("Every active token for this account will stop working immediately.")}
+                  okText={t("Force logout")}
+                  cancelText={t("Cancel")}
+                  onConfirm={() => forceLogout(row)}
+                >
+                  <Button size="small" icon={<LogoutOutlined />}>{t("Force logout")}</Button>
+                </Popconfirm>
+                <Button
+                  size="small"
+                  danger
+                  icon={<SafetyCertificateOutlined />}
+                  disabled={!row.twofa_enabled}
+                  onClick={() => openReset2FA(row)}
+                >
+                  {t("Reset 2FA")}
+                </Button>
+              </>
+            ) : null}
+            {row.role !== "owner" ? (
+              <Popconfirm
+                title={t("Delete this admin?")}
+                okText={t("Delete")}
+                cancelText={t("Cancel")}
+                onConfirm={() => api.remove("admin-users", row.id).then(load)}
+                okButtonProps={{ danger: true }}
+              >
+                <Button size="small" danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            ) : null}
+          </Space>
+        );
+      },
+    },
   ];
 
-  return <>
-    <div className="bdg-filters">
-      <div style={{ flex: 1 }}>
-        <h2 style={{ margin: 0 }}>Admin Users</h2>
-        <div style={{ color: "#8ea0bd", fontSize: 12 }}>Owner can change email, create admins, disable users, and reset passwords.</div>
+  return (
+    <>
+      <div className="bdg-filters">
+        <div style={{ flex: 1 }}>
+          <h2 style={{ margin: 0 }}>{t("Admin Users")}</h2>
+          <div style={{ color: "#8ea0bd", fontSize: 12 }}>
+            {t(platformContext
+              ? "Manage administrators assigned to this platform."
+              : "Owner security actions are protected, confirmed, and recorded in Audit Logs.")}
+          </div>
+        </div>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={load}>{t("Refresh")}</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={create}>{t("Create admin")}</Button>
+        </Space>
       </div>
-      <Space>
-        <Button icon={<ReloadOutlined />} onClick={load}>Refresh</Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={create}>Create admin</Button>
-      </Space>
-    </div>
-    <Table className="bdg-table" rowKey="id" loading={loading} columns={columns} dataSource={rows} pagination={{ pageSize: 20 }} />
 
-    <Drawer title={editing ? "Edit admin" : "Create admin"} width={520} open={open} onClose={() => setOpen(false)} extra={<Space><Button onClick={() => setOpen(false)}>Cancel</Button><Button type="primary" onClick={save}>Save</Button></Space>}>
-      <Form layout="vertical" form={form}>
-        <Form.Item name="name" label="Name" rules={[{ required: true }]}><Input /></Form.Item>
-        <Form.Item name="email" label="Email" rules={[{ required: true, type: "email" }]}><Input /></Form.Item>
-        {!editing && <Form.Item name="password" label="Temporary password" rules={[{ required: true, min: 8 }]}><Input.Password /></Form.Item>}
-        <Form.Item name="role" label="Role"><Select options={getActiveAdminPlatformRoute() ? ["platform_admin", "content_manager", "ai_manager", "support_analyst", "viewer"].map((value) => ({ value, label: value.replace(/_/g, " ") })) : [{ value: "admin", label: "Admin" }, { value: "owner", label: "Owner (protected, only first owner remains owner)" }]} /></Form.Item>
-        <Form.Item name="status" label="Status"><Select options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]} /></Form.Item>
-      </Form>
-    </Drawer>
+      <Table
+        className="bdg-table"
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={rows}
+        pagination={{ pageSize: 20 }}
+        scroll={{ x: 1100 }}
+      />
 
-    <Drawer title={`Change password${passwordUser ? ` · ${passwordUser.email}` : ""}`} width={420} open={passwordOpen} onClose={() => setPasswordOpen(false)} extra={<Space><Button onClick={() => setPasswordOpen(false)}>Cancel</Button><Button type="primary" onClick={changePassword}>Update password</Button></Space>}>
-      <Form layout="vertical" form={passwordForm}>
-        <Form.Item name="password" label="New password" rules={[{ required: true, min: 8 }]}><Input.Password /></Form.Item>
-        <Form.Item name="confirm_password" label="Confirm password" rules={[{ required: true, min: 8 }]}><Input.Password /></Form.Item>
-      </Form>
-    </Drawer>
-  </>;
+      <Drawer
+        title={t(editing ? "Edit admin" : "Create admin")}
+        width={520}
+        open={open}
+        onClose={() => setOpen(false)}
+        extra={<Space><Button onClick={() => setOpen(false)}>{t("Cancel")}</Button><Button type="primary" onClick={save}>{t("Save")}</Button></Space>}
+      >
+        <Form layout="vertical" form={form}>
+          <Form.Item name="name" label={t("Name")} rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="email" label={t("Email")} rules={[{ required: true, type: "email" }]}><Input /></Form.Item>
+          {!editing ? (
+            <Form.Item name="password" label={t("Temporary password")} rules={[{ required: true, min: 12 }]}>
+              <Input.Password autoComplete="new-password" />
+            </Form.Item>
+          ) : null}
+          <Form.Item name="role" label={t("Role")}>
+            <Select options={platformContext
+              ? ["platform_admin", "content_manager", "ai_manager", "support_analyst", "viewer"].map((value) => ({ value, label: value.replaceAll("_", " ") }))
+              : [{ value: "admin", label: t("Admin") }, { value: "owner", label: t("Owner (protected)") }]}
+            />
+          </Form.Item>
+          <Form.Item name="status" label={t("Status")}>
+            <Select options={[{ value: "active", label: t("Active") }, { value: "inactive", label: t("Inactive") }]} />
+          </Form.Item>
+        </Form>
+      </Drawer>
+
+      <Drawer
+        title={[t("Change password"), passwordUser?.email].filter(Boolean).join(" · ")}
+        width={420}
+        open={passwordOpen}
+        onClose={() => setPasswordOpen(false)}
+        extra={<Space><Button onClick={() => setPasswordOpen(false)}>{t("Cancel")}</Button><Button type="primary" onClick={changePassword}>{t("Update password")}</Button></Space>}
+      >
+        <Alert
+          type="info"
+          showIcon
+          message={t("Changing the password revokes the administrator's existing sessions.")}
+          style={{ marginBottom: 16 }}
+        />
+        <Form layout="vertical" form={passwordForm}>
+          <Form.Item name="password" label={t("New password")} rules={[{ required: true, min: 12 }]}>
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item name="confirm_password" label={t("Confirm password")} rules={[{ required: true, min: 12 }]}>
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+        </Form>
+      </Drawer>
+
+      <Drawer
+        title={[t("Reset 2FA"), resetUser?.email].filter(Boolean).join(" · ")}
+        width={440}
+        open={resetOpen}
+        onClose={() => setResetOpen(false)}
+        extra={<Space><Button onClick={() => setResetOpen(false)}>{t("Cancel")}</Button><Button danger type="primary" onClick={reset2FA}>{t("Reset 2FA")}</Button></Space>}
+      >
+        <Alert
+          type="warning"
+          showIcon
+          message={t("This removes 2FA and revokes every active session for the selected administrator.")}
+          description={t("If your owner account has 2FA enabled, enter your own authenticator code to authorize this action.")}
+          style={{ marginBottom: 16 }}
+        />
+        <Form layout="vertical" form={resetForm}>
+          <Form.Item name="owner_code" label={t("Owner 2FA code")}>
+            <Input inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="123456" />
+          </Form.Item>
+        </Form>
+      </Drawer>
+    </>
+  );
 }
