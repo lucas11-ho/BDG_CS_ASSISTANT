@@ -43,7 +43,7 @@
     "test:v1181-ai-knowledge": "node scripts/v1.18.1-ai-knowledge-regression-test.js",
     "test:v1182-ai-knowledge": "node scripts/v1.18.2-ai-knowledge-library-regression-test.js",
     "test:v1183-frontend": "node scripts/v1.18.3-platform-brand-localization-regression-test.js",
-    "test:v1184-bulk-content": "node scripts/v1.18.4-bulk-content-studio-regression-test.js",
+    "test:v1184-bulk-content": "node scripts/v1.18.4-bulk-content-studio-regression-test.js && node scripts/v1.18.5-localized-faq-topics-regression-test.js",
     "test:v1185-faq-topics": "node scripts/v1.18.5-localized-faq-topics-regression-test.js"
   },
   "dependencies": {
