@@ -516,6 +516,14 @@ export async function applyGuideImport(request, env, scope, options = {}) {
   return transaction(env, async (q) => {
     const validated = await validateGuideRows(q, scope, parsed);
     const rawByKey = new Map(parsed.map((row) => [row.key, row]));
+    // Several locale rows intentionally share one stable slug. Validation runs
+    // before writes, so remember a parent Guide created earlier in this same
+    // transaction instead of attempting a second conflicting INSERT.
+    const guideIdsBySlug = new Map(
+      validated
+        .filter((row) => row.existing_guide_id)
+        .map((row) => [row.slug, Number(row.existing_guide_id)]),
+    );
     const policy = await getLocalePolicy(q, scope);
     let created = 0, updated = 0, skipped = 0;
     const errors = [];
@@ -529,11 +537,12 @@ export async function applyGuideImport(request, env, scope, options = {}) {
         catch (error) { warnings.push({ row_number: row.row_number, warning: `Embedded image upload failed: ${error.message}. Guide imported without replacing its image.` }); }
       }
       for (const warning of row.warnings || []) warnings.push({ row_number: row.row_number, warning });
-      let guideId = row.existing_guide_id;
+      let guideId = Number(row.existing_guide_id || guideIdsBySlug.get(row.slug) || 0) || null;
       const buttonIdsText = JSON.stringify(row.button_ids || []);
       if (!guideId) {
         const inserted = (await q(`INSERT INTO guides(title,slug,summary,body,image_urls,keywords,language,priority,status,category_id,button_ids,tenant_id,platform_id,updated_at) VALUES($1,$2,$3,'',$4,'',$5,$6,'draft',$7,$8,$9,$10,NOW()) RETURNING id`, [row.title,row.slug,row.summary,imageUrl ? imageUrl : '',policy.defaultLocale,row.sort_order,row.category_id,buttonIdsText,scope.tenant_id,scope.platform_id])).rows[0];
         guideId = Number(inserted.id);
+        guideIdsBySlug.set(row.slug, guideId);
       } else {
         await q(`UPDATE guides SET category_id=$1,priority=$2,button_ids=$3,updated_at=NOW() WHERE id=$4 AND tenant_id=$5 AND platform_id=$6`, [row.category_id,row.sort_order,buttonIdsText,guideId,scope.tenant_id,scope.platform_id]);
       }
