@@ -152,7 +152,9 @@ async function parseFaqWorkbook(buffer) {
     if (rows.length >= MAX_IMPORT_ROWS) throw Object.assign(new Error(`Workbook contains more than ${MAX_IMPORT_ROWS} data rows.`), { status: 400, code: 'BULK_ROW_LIMIT' });
     const question = text(values[qIndex], 500);
     const locale = localeKey(values[localeIndex]);
-    const topic = topicLabel(topicIndex >= 0 ? values[topicIndex] : 'General');
+    const topicRaw = topicIndex >= 0 ? text(values[topicIndex], 160) : '';
+    const topic = topicLabel(topicRaw);
+    const topic_supplied = topicIndex >= 0 && !!topicRaw;
     const answer = text(values[answerIndex], 20000);
     const status = safeStatus(values[statusIndex]);
     const key = `${locale}\u0000${normalizedQuestion(question)}`;
@@ -163,19 +165,20 @@ async function parseFaqWorkbook(buffer) {
     else if (!status) error = 'Status must be draft, published, or archived.';
     else if (seen.has(key)) error = `Duplicate Question + Locale in workbook (first seen on row ${seen.get(key)}).`;
     if (!error) seen.set(key, rowNumber);
-    rows.push({ row_number: rowNumber, question, locale, topic, answer, status, key, error, warnings: [] });
+    rows.push({ row_number: rowNumber, question, locale, topic, topic_supplied, answer, status, key, error, warnings: [] });
   }
   return rows;
 }
 
 async function validateRows(q, scope, rows) {
   const locales = await localePolicy(q, scope);
-  const existing = (await q('SELECT id,question,locale FROM faqs WHERE tenant_id=$1 AND platform_id=$2 ORDER BY id ASC', [scope.tenant_id, scope.platform_id])).rows;
+  const existing = (await q('SELECT id,question,locale,topic FROM faqs WHERE tenant_id=$1 AND platform_id=$2 ORDER BY id ASC', [scope.tenant_id, scope.platform_id])).rows;
   const map = new Map(existing.map((row) => [`${localeKey(row.locale)}\u0000${normalizedQuestion(row.question)}`, row]));
   return rows.map((row) => {
     const error = row.error || (!locales.has(row.locale) ? `Unsupported locale: ${row.locale}. Enable it in Platform Settings first.` : '');
     const match = !error ? map.get(row.key) : null;
-    return { ...row, error, action: error ? 'skip' : (match ? 'update' : 'create'), existing_id: match?.id || null };
+    const effectiveTopic = row.topic_supplied ? row.topic : (match ? topicLabel(match.topic) : 'General');
+    return { ...row, topic: effectiveTopic, error, action: error ? 'skip' : (match ? 'update' : 'create'), existing_id: match?.id || null };
   });
 }
 
@@ -222,7 +225,7 @@ export async function buildFaqTopicTemplate() {
     'Columns: Question, Locale, Topic, Answer, Status.',
     'Question + Locale remains the import identity. Changing Topic updates the matching FAQ instead of creating a duplicate.',
     'Topic is locale-specific. Example: en-us = Deposit, hi-in = जमा, my-mm = ငွေသွင်း. Use the language of that FAQ row so customers see a topic they understand.',
-    'Older 4-column workbooks without Topic are still accepted and use General.',
+    'Older 4-column workbooks without Topic are still accepted. Existing FAQs keep their saved Topic; newly created FAQs use General.',
     'Only platform-supported locales are accepted.',
     'By default imports are forced to Draft. Use Preserve spreadsheet status only when you intentionally want the supplied status.',
     `Maximum rows: ${MAX_IMPORT_ROWS}. Maximum workbook size: 20 MB.`,
@@ -330,17 +333,18 @@ export async function handleFaqTopicBulkRoute(request, env, scope) {
 }
 
 export function faqTopicFromJsonBody(body) {
-  if (!body) return 'General';
+  if (!body) return null;
   try {
     const parsed = JSON.parse(Buffer.from(body).toString('utf8'));
-    return topicLabel(parsed?.topic);
+    if (!Object.prototype.hasOwnProperty.call(parsed || {}, 'topic')) return null;
+    return topicLabel(parsed.topic);
   } catch {
-    return 'General';
+    return null;
   }
 }
 
 export async function persistFaqTopicFromResponse(response, env, topic) {
-  if (!response?.ok) return;
+  if (!response?.ok || topic == null) return;
   let payload = null;
   try { payload = await response.clone().json(); } catch { return; }
   const id = Number(payload?.id);
