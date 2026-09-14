@@ -355,9 +355,13 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(response.status, headers);
     res.end(responseBody);
   } catch (error) {
-    const status = Number(error.status || 500);
-    jsonResponse(res, status, { ok: false, error: status >= 500 ? 'Service temporarily unavailable' : error.message, code: error.code || undefined, request_id: requestId, version: API_VERSION }, { 'Cache-Control': 'no-store', 'X-Request-ID': requestId, ...(corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {}) });
-    console.error(JSON.stringify({ level: 'error', request_id: requestId, method: req.method, path, status, duration_ms: Date.now() - started, message: error.message, stack: error.stack }));
+    const conflict = error?.code === '23505';
+    const status = conflict ? 409 : Number(error.status || 500);
+    const publicMessage = conflict
+      ? 'A record with the same unique value already exists. Refresh the preview and try again.'
+      : status >= 500 ? 'Service temporarily unavailable' : error.message;
+    jsonResponse(res, status, { ok: false, error: publicMessage, code: conflict ? 'CONTENT_CONFLICT' : (error.code || undefined), request_id: requestId, version: API_VERSION }, { 'Cache-Control': 'no-store', 'X-Request-ID': requestId, ...(corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {}) });
+    console.error(JSON.stringify({ level: 'error', request_id: requestId, method: req.method, path, status, database_code: error?.code, duration_ms: Date.now() - started, message: error.message, stack: error.stack }));
     return;
   } finally {
     console.log(JSON.stringify({ level: 'info', request_id: requestId, method: req.method, path, status: res.statusCode, duration_ms: Date.now() - started, ip: clientIp(req), version: API_VERSION, ...databaseDescriptor(env) }));
