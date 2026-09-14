@@ -40,12 +40,12 @@ function FaqStudioPage() {
   useEffect(() => { void load(); }, []);
 
   const openEditor = (item?: any) => {
-    const current = item || { question: "", locale: defaultLocale || localeOptions[0]?.value || "en", status: "published", priority: 100, keywords: "" };
+    const current = item || { question: "", topic: "General", locale: defaultLocale || localeOptions[0]?.value || "en", status: "published", priority: 100, keywords: "" };
     setEditing(current);
     setAnswerJson(current.answer_json || blankDoc);
     setAnswerHtml(current.answer_html || "");
     setImageUrls(Array.isArray(current.image_urls) ? current.image_urls : []);
-    form.setFieldsValue(current);
+    form.setFieldsValue({ ...current, topic: current.topic || current.category || "General" });
   };
   const closeEditor = () => { setEditing(null); form.resetFields(); setAnswerJson(blankDoc); setAnswerHtml(""); setImageUrls([]); };
   const uploadImage = async (file: File) => (await api.upload(file)).url;
@@ -58,7 +58,7 @@ function FaqStudioPage() {
     try {
       const values = await form.validateFields();
       setSaving(true);
-      const payload = { ...values, answer: answerHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(), answer_html: answerHtml, answer_json: answerJson, image_urls: imageUrls };
+      const payload = { ...values, topic: String(values.topic || "General").trim() || "General", answer: answerHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(), answer_html: answerHtml, answer_json: answerJson, image_urls: imageUrls };
       if (editing?.id) await api.update("faq", editing.id, payload); else await api.create("faq", payload);
       message.success(editing?.id ? "FAQ updated" : "FAQ created"); closeEditor(); await load();
     } catch (error: any) { if (error?.errorFields) return; message.error(error?.message || "Could not save FAQ"); }
@@ -68,19 +68,25 @@ function FaqStudioPage() {
   const columns = useMemo(() => [
     { title: "Question", dataIndex: "question", render: (v: string) => <b>{v}</b> },
     { title: "Locale", dataIndex: "locale", width: 90, render: (v: string) => <Tag>{String(v || "en").toUpperCase()}</Tag> },
+    { title: "Topic", dataIndex: "topic", width: 150, render: (v: string) => <Tag color="blue">{v || "General"}</Tag> },
     { title: "Answer", dataIndex: "answer", ellipsis: true },
     { title: "Status", dataIndex: "status", width: 110, render: (v: string) => <Tag color={v === "published" ? "green" : "gold"}>{v}</Tag> },
     { title: "Actions", width: 150, render: (_: any, row: any) => <Space><Button size="small" icon={<EditOutlined />} onClick={() => openEditor(row)}>Edit</Button><Popconfirm title="Delete this FAQ?" onConfirm={() => remove(row.id)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ], []);
 
   return <>
-    <Alert showIcon type="info" message="Rich FAQ Studio" description="FAQ answers support formatted text, colors, highlights, links, tables, and uploaded images. Publish only the locale-specific answer intended for this platform." style={{ marginBottom: 12 }} />
+    <Alert showIcon type="info" message="Rich FAQ Studio" description="FAQ answers support formatted text, colors, highlights, links, tables, uploaded images, and a localized Topic. Write the Topic in the same language as the FAQ locale—for example English: Deposit, Hindi: जमा, Myanmar: ငွေသွင်း—so the public FAQ grouping is understandable in every language." style={{ marginBottom: 12 }} />
     <div className="bdg-filters" style={{ marginBottom: 12 }}><div style={{ flex: 1, color: "#8ea0bd" }}>Answers remain backward-compatible with the plain FAQ field. Platform locales: {localeOptions.length ? localeOptions.map((locale) => locale.value).join(", ") : "loading…"}</div><Button onClick={() => void load()}>Refresh</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>New FAQ</Button></div>
-    <Table rowKey="id" loading={loading} dataSource={rows} columns={columns as any} pagination={{ pageSize: 20 }} />
+    <Table rowKey="id" loading={loading} dataSource={rows} columns={columns as any} pagination={{ pageSize: 20 }} scroll={{ x: 980 }} />
     <Drawer open={!!editing} onClose={closeEditor} width="min(1180px, 96vw)" title={editing?.id ? `Edit FAQ — ${editing.question}` : "New FAQ"} extra={<Space><Button onClick={closeEditor}>Cancel</Button><Button type="primary" loading={saving} onClick={save}>Save</Button></Space>}>
       <Form form={form} layout="vertical">
         <Form.Item name="question" label="Question" rules={[{ required: true }]}><Input placeholder="How do I make a deposit?" /></Form.Item>
-        <Space style={{ display: "flex" }} align="start"><Form.Item name="locale" label="Locale" rules={[{ required: true }]} style={{ width: 250 }}><Select showSearch optionFilterProp="label" loading={loading && !localeOptions.length} options={localeOptions} placeholder="Choose a platform locale" /></Form.Item><Form.Item name="status" label="Status" style={{ width: 180 }}><Select options={["published", "draft", "archived"].map((v) => ({ value: v, label: v }))} /></Form.Item><Form.Item name="priority" label="Priority"><InputNumber min={1} max={999} /></Form.Item></Space>
+        <Space style={{ display: "flex", flexWrap: "wrap" }} align="start">
+          <Form.Item name="locale" label="Locale" rules={[{ required: true }]} style={{ width: 250 }}><Select showSearch optionFilterProp="label" loading={loading && !localeOptions.length} options={localeOptions} placeholder="Choose a platform locale" /></Form.Item>
+          <Form.Item name="topic" label="Topic (localized)" rules={[{ required: true, message: "Topic is required" }]} style={{ width: 260 }} extra="Use the same language as this FAQ locale."><Input maxLength={160} placeholder="General / Deposit / Withdrawal / Bank" /></Form.Item>
+          <Form.Item name="status" label="Status" style={{ width: 180 }}><Select options={["published", "draft", "archived"].map((v) => ({ value: v, label: v }))} /></Form.Item>
+          <Form.Item name="priority" label="Priority"><InputNumber min={1} max={999} /></Form.Item>
+        </Space>
         <Form.Item name="keywords" label="Search keywords and misspellings"><Input.TextArea rows={3} /></Form.Item>
         <Form.Item name="answer" hidden><Input /></Form.Item>
         <Form.Item label="FAQ answer — rich editor"><RichKnowledgeEditor value={answerJson} onChange={(json, html) => { setAnswerJson(json); setAnswerHtml(html); }} uploadImage={uploadImage} /></Form.Item>
@@ -89,4 +95,3 @@ function FaqStudioPage() {
     </Drawer>
   </>;
 }
-
