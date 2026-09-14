@@ -97,7 +97,11 @@ function excludedElement(element: Element | null) {
   return false;
 }
 
-function aggressiveElement(element: Element | null) {
+// Runtime translation is a compatibility bridge for old hard-coded Admin chrome.
+// Stored business/customer content must never be rewritten just because an Admin
+// chooses a different UI language. Table body data and live conversation text are
+// therefore protected unless the text belongs to an obvious interactive UI control.
+function translatableUiElement(element: Element | null) {
   if (!element || excludedElement(element)) return false;
   if (element.closest(".ant-table-tbody") && !element.closest("button,.ant-btn,.ant-tag,.ant-switch,.ant-select,.ant-dropdown,.ant-popconfirm")) return false;
   if (element.closest(".support-admin-workspace main") && !element.closest("button,.ant-btn,.ant-tag,.ant-select,.ant-tabs-tab,.ant-form-item-label")) return false;
@@ -115,7 +119,9 @@ function translateTextNode(node: Text, locale: AdminLocale) {
     source = current;
     originalText.set(node, current);
   }
-  const next = locale === "en" ? source : translateAdminText(source, locale, aggressiveElement(parent));
+  const next = locale === "en" || !translatableUiElement(parent)
+    ? source
+    : translateAdminText(source, locale, true);
   renderedText.set(node, next);
   if (current !== next) node.nodeValue = next;
 }
