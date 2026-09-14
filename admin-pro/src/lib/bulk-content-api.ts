@@ -11,8 +11,14 @@ export type BulkKind = "faq" | "guide";
 export type BulkStatusMode = "draft" | "preserve";
 
 function token() {
-  if (typeof localStorage === "undefined") return "";
-  return localStorage.getItem("admin_token") || localStorage.getItem("bdg_token") || "";
+  if (typeof window === "undefined") return "";
+  return (
+    window.localStorage.getItem("admin_token") ||
+    window.localStorage.getItem("bdg_token") ||
+    window.sessionStorage.getItem("admin_token") ||
+    window.sessionStorage.getItem("bdg_token") ||
+    ""
+  );
 }
 
 function platformRoute() {
