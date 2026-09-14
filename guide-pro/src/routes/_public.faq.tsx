@@ -30,13 +30,18 @@ function FAQ() {
     if (!data) return [];
     const search = q.toLowerCase();
     if (!search) return data;
-    return data.filter((faq) => faq.question.toLowerCase().includes(search) || faq.answer.toLowerCase().includes(search) || (faq.answerHtml || "").toLowerCase().includes(search));
+    return data.filter((faq) =>
+      faq.question.toLowerCase().includes(search)
+      || faq.answer.toLowerCase().includes(search)
+      || (faq.answerHtml || "").toLowerCase().includes(search)
+      || (faq.category || "").toLowerCase().includes(search)
+    );
   }, [data, q]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, Faq[]>();
     filtered.forEach((faq) => {
-      const key = faq.category ?? "general";
+      const key = faq.category ?? "General";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(faq);
     });
