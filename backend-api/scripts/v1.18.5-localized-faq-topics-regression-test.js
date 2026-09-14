@@ -27,13 +27,21 @@ await test('FAQ topic migration is additive and defaults existing rows to Genera
   assert.ok(migration.includes('idx_faqs_scope_locale_topic_status'));
 });
 
-await test('FAQ Excel preview/import/export all carry Topic', async () => {
+await test('FAQ Excel preview/import/export all carry Topic without breaking old workbooks', async () => {
   const source = fs.readFileSync(new URL('../src/faq-topics.js', import.meta.url), 'utf8');
   assert.ok(source.includes("{ header: 'Topic', key: 'topic'"));
   assert.ok(source.includes('topic=$6'));
   assert.ok(source.includes('locale,topic,keywords'));
   assert.ok(source.includes("COALESCE(NULLIF(BTRIM(topic),''),'General') AS topic"));
   assert.ok(source.includes('Older 4-column workbooks without Topic are still accepted'));
+  assert.ok(source.includes('topic_supplied'));
+  assert.ok(source.includes('match ? topicLabel(match.topic)'));
+});
+
+await test('Legacy API clients that omit Topic do not erase a saved Topic', async () => {
+  const source = fs.readFileSync(new URL('../src/faq-topics.js', import.meta.url), 'utf8');
+  assert.ok(source.includes("hasOwnProperty.call(parsed || {}, 'topic')"));
+  assert.ok(source.includes('if (!response?.ok || topic == null) return'));
 });
 
 await test('Admin exposes localized Topic management and Excel preview', async () => {
@@ -45,13 +53,16 @@ await test('Admin exposes localized Topic management and Excel preview', async (
   assert.ok(toolbar.includes('{ title: "Topic", dataIndex: "topic"'));
 });
 
-await test('Runtime enriches FAQ responses so the existing Guide grouping shows localized Topic labels', async () => {
+await test('Runtime enriches FAQ responses so Guide grouping uses localized Topic labels', async () => {
   const runtime = fs.readFileSync(new URL('../src/faq-topics.js', import.meta.url), 'utf8');
   const server = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+  const publicFaq = fs.readFileSync(new URL('../../guide-pro/src/routes/_public.faq.tsx', import.meta.url), 'utf8');
   assert.ok(runtime.includes('return { ...row, topic, category: topic }'));
   assert.ok(server.includes('enrichFaqTopicResponse'));
   assert.ok(server.includes('persistFaqTopicFromResponse'));
   assert.ok(server.includes("path.startsWith('/admin/content-bulk/faq/')"));
+  assert.ok(publicFaq.includes('(faq.category || "").toLowerCase().includes(search)'));
+  assert.ok(publicFaq.includes('const key = faq.category ?? "General"'));
 });
 
 await test('Production release marker advances to localized FAQ topics', async () => {
