@@ -50,7 +50,7 @@ await test('Admin exposes localized Topic management and Excel preview', async (
   assert.ok(page.includes('Topic (localized)'));
   assert.ok(page.includes('Use the same language as this FAQ locale.'));
   assert.ok(page.includes('dataIndex: "topic"'));
-  assert.ok(toolbar.includes('{ title: "Topic", dataIndex: "topic"'));
+  assert.match(toolbar, /title:\s*(?:t\()?['"]Topic['"]\)?\s*,\s*dataIndex:\s*['"]topic['"]/);
 });
 
 await test('Runtime enriches FAQ responses so Guide grouping uses localized Topic labels', async () => {
