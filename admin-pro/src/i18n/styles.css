@@ -1,0 +1,29 @@
+html[data-admin-locale="zh-CN"] body,
+html[data-admin-locale="zh-CN"] .ant-app,
+html[data-admin-locale="zh-CN"] .ant-typography,
+html[data-admin-locale="zh-CN"] .ant-btn,
+html[data-admin-locale="zh-CN"] .ant-input,
+html[data-admin-locale="zh-CN"] .ant-select,
+html[data-admin-locale="zh-CN"] .ant-table {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+}
+
+html[data-admin-locale="my-MM"] body,
+html[data-admin-locale="my-MM"] .ant-app,
+html[data-admin-locale="my-MM"] .ant-typography,
+html[data-admin-locale="my-MM"] .ant-btn,
+html[data-admin-locale="my-MM"] .ant-input,
+html[data-admin-locale="my-MM"] .ant-select,
+html[data-admin-locale="my-MM"] .ant-table,
+html[data-admin-locale="my-MM"] .ant-form-item,
+html[data-admin-locale="my-MM"] .ant-menu {
+  font-family: "Noto Sans Myanmar", "Myanmar Text", Pyidaungsu, Padauk, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.58;
+}
+
+html[data-admin-locale="my-MM"] .ant-menu-item,
+html[data-admin-locale="my-MM"] .ant-menu-item-group-title,
+html[data-admin-locale="my-MM"] .ant-btn,
+html[data-admin-locale="my-MM"] .ant-tag {
+  letter-spacing: 0;
+}

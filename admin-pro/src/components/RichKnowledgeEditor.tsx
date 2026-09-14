@@ -29,6 +29,7 @@ import {
   AlignCenterOutlined,
   AlignRightOutlined,
 } from "@ant-design/icons";
+import { useAdminI18n } from "@/i18n/runtime";
 
 type Props = {
   value?: string;
@@ -47,6 +48,7 @@ function parseDocument(value?: string) {
 }
 
 export default function RichKnowledgeEditor({ value, onChange, uploadImage }: Props) {
+  const { t } = useAdminI18n();
   const [fullscreen, setFullscreen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const editor = useEditor({
@@ -67,6 +69,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage }: Pr
       attributes: {
         class: "bdg-rich-editor-content",
         spellcheck: "true",
+        "data-i18n-skip": "true",
       },
     },
   });
@@ -82,7 +85,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage }: Pr
 
   const addLink = () => {
     const current = editor.getAttributes("link").href || "https://";
-    const href = window.prompt("Enter the official link", current);
+    const href = window.prompt(t("Enter the official link"), current);
     if (href === null) return;
     if (!href.trim()) editor.chain().focus().unsetLink().run();
     else editor.chain().focus().extendMarkRange("link").setLink({ href: href.trim() }).run();
@@ -93,16 +96,16 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage }: Pr
     try {
       const url = await uploadImage(file);
       editor.chain().focus().setImage({ src: url, alt: file.name }).run();
-      message.success("Image inserted");
+      message.success(t("Image inserted"));
     } catch (error: any) {
-      message.error(error?.message || "Image upload failed");
+      message.error(error?.message || t("Image upload failed"));
     } finally {
       if (inputRef.current) inputRef.current.value = "";
     }
   };
 
   const tool = (title: string, icon: React.ReactNode, action: () => void, active = false) => (
-    <Tooltip title={title}>
+    <Tooltip title={t(title)}>
       <Button size="small" type={active ? "primary" : "default"} icon={icon} onClick={action} />
     </Tooltip>
   );
@@ -128,10 +131,10 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage }: Pr
           {tool("Align center", <AlignCenterOutlined />, () => editor.chain().focus().setTextAlign("center").run(), editor.isActive({ textAlign: "center" }))}
           {tool("Align right", <AlignRightOutlined />, () => editor.chain().focus().setTextAlign("right").run(), editor.isActive({ textAlign: "right" }))}
           <Divider orientation="vertical" />
-          <Tooltip title="Text color">
+          <Tooltip title={t("Text color")}>
             <ColorPicker size="small" defaultValue="#17233b" onChangeComplete={(color) => editor.chain().focus().setColor(color.toHexString()).run()} />
           </Tooltip>
-          <Tooltip title="Highlight">
+          <Tooltip title={t("Highlight")}>
             <ColorPicker size="small" defaultValue="#fff1a8" onChangeComplete={(color) => editor.chain().focus().toggleHighlight({ color: color.toHexString() }).run()} />
           </Tooltip>
           {tool("Link", <LinkOutlined />, addLink, editor.isActive("link"))}
