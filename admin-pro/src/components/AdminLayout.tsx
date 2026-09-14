@@ -33,9 +33,10 @@ import {
 } from "@ant-design/icons";
 import { Link, useLocation, useNavigate, useMatches } from "@tanstack/react-router";
 import { api, getActiveAdminPlatformRoute, getCurrentUser, logout } from "@/lib/api";
+import AccountSecurityDrawer from "@/components/AccountSecurityDrawer";
 
 const { Sider, Header, Content } = Layout;
-const ADMIN_VERSION = "v1.18.2";
+const ADMIN_VERSION = "v1.19.1";
 
 const NAV: { key: string; to: string; label: string; icon: ReactNode; group?: string }[] = [
   {
@@ -247,6 +248,7 @@ export default function AdminLayout({
   const [collapsed, setCollapsed] = useState(false);
   const [adminLang, setAdminLang] = useState(langNow());
   const [platformContext, setPlatformContext] = useState<any>(null);
+  const [securityOpen, setSecurityOpen] = useState(false);
   const user = getCurrentUser();
   const location = useLocation();
   const navigate = useNavigate();
@@ -264,7 +266,12 @@ export default function AdminLayout({
   const crumbTitle = title ?? current?.label ?? "Dashboard";
 
   const userMenu: MenuProps["items"] = [
-    { key: "profile", icon: <UserOutlined />, label: tr("My Profile") },
+    {
+      key: "profile",
+      icon: <UserOutlined />,
+      label: tr("Account & Security"),
+      onClick: () => setSecurityOpen(true),
+    },
     { type: "divider" },
     {
       key: "logout",
@@ -381,6 +388,7 @@ export default function AdminLayout({
           </Content>
         </Layout>
       </Layout>
+      <AccountSecurityDrawer open={securityOpen} onClose={() => setSecurityOpen(false)} />
     </ConfigProvider>
   );
 }
