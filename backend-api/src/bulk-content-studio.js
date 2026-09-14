@@ -513,50 +513,61 @@ export async function applyGuideImport(request, env, scope, options = {}) {
   const { name, buffer } = await workbookFile(request, 'Guide_Import.xlsx');
   const parsed = await parseGuideWorkbook(buffer);
   const statusMode = options.statusMode === 'preserve' ? 'preserve' : 'draft';
-  return transaction(env, async (q) => {
-    const validated = await validateGuideRows(q, scope, parsed);
-    const rawByKey = new Map(parsed.map((row) => [row.key, row]));
-    const policy = await getLocalePolicy(q, scope);
-    let created = 0, updated = 0, skipped = 0;
-    const errors = [];
-    const warnings = [];
-    for (const row of validated) {
-      if (row.error) { skipped += 1; errors.push({ row_number: row.row_number, error: row.error }); continue; }
-      const raw = rawByKey.get(row.key);
-      let imageUrl = row.image_url;
-      if (!imageUrl && raw?.embedded_image && isImageSignature(raw.embedded_image.buffer, raw.embedded_image.extension)) {
-        try { imageUrl = await uploadEmbeddedGuideImage(env, scope, request.url, row, raw.embedded_image); }
-        catch (error) { warnings.push({ row_number: row.row_number, warning: `Embedded image upload failed: ${error.message}. Guide imported without replacing its image.` }); }
+  let activeRowNumber = null;
+  try {
+    return await transaction(env, async (q) => {
+      const validated = await validateGuideRows(q, scope, parsed);
+      const rawByKey = new Map(parsed.map((row) => [row.key, row]));
+      const policy = await getLocalePolicy(q, scope);
+      let created = 0, updated = 0, skipped = 0;
+      const errors = [];
+      const warnings = [];
+      for (const row of validated) {
+        activeRowNumber = row.row_number;
+        if (row.error) { skipped += 1; errors.push({ row_number: row.row_number, error: row.error }); continue; }
+        const raw = rawByKey.get(row.key);
+        let imageUrl = row.image_url;
+        if (!imageUrl && raw?.embedded_image && isImageSignature(raw.embedded_image.buffer, raw.embedded_image.extension)) {
+          try { imageUrl = await uploadEmbeddedGuideImage(env, scope, request.url, row, raw.embedded_image); }
+          catch (error) { warnings.push({ row_number: row.row_number, warning: `Embedded image upload failed: ${error.message}. Guide imported without replacing its image.` }); }
+        }
+        for (const warning of row.warnings || []) warnings.push({ row_number: row.row_number, warning });
+        const buttonIdsText = JSON.stringify(row.button_ids || []);
+        const parent = (await q(`INSERT INTO guides(title,slug,summary,body,image_urls,keywords,language,priority,status,category_id,button_ids,tenant_id,platform_id,updated_at)
+          VALUES($1,$2,$3,'',$4,'',$5,$6,'draft',$7,$8,$9,$10,NOW())
+          ON CONFLICT (platform_id,slug) WHERE deleted_at IS NULL
+          DO UPDATE SET category_id=EXCLUDED.category_id,priority=EXCLUDED.priority,button_ids=EXCLUDED.button_ids,updated_at=NOW()
+          RETURNING id`, [row.title,row.slug,row.summary,imageUrl ? imageUrl : '',policy.defaultLocale,row.sort_order,row.category_id,buttonIdsText,scope.tenant_id,scope.platform_id])).rows[0];
+        const guideId = Number(parent?.id);
+        if (!Number.isFinite(guideId) || guideId < 1) throw Object.assign(new Error(`Unable to resolve the parent Guide for stable slug ${row.slug}.`), { status: 409, code: 'GUIDE_PARENT_UPSERT_FAILED' });
+        await q('DELETE FROM guide_action_buttons WHERE guide_id=$1', [guideId]);
+        let buttonOrder = 100;
+        for (const buttonId of row.button_ids || []) await q('INSERT INTO guide_action_buttons(guide_id,button_id,sort_order) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [guideId, buttonId, buttonOrder++]);
+        const effectiveStatus = statusMode === 'preserve' ? row.status : 'draft';
+        const existingTranslation = (await q('SELECT id FROM guide_translations WHERE guide_id=$1 AND platform_id=$2 AND locale=$3 LIMIT 1', [guideId,scope.platform_id,row.locale])).rows[0];
+        await q(`INSERT INTO guide_translations(tenant_id,platform_id,guide_id,locale,title,summary,body,rich_json,rich_html,image_urls,cover_image_url,keywords,seo_title,seo_description,alt_text,status,updated_at)
+          VALUES($1,$2,$3,$4,$5,$6,'','','',$7,$7,'',$8,'',$9,$10,NOW())
+          ON CONFLICT (platform_id,guide_id,locale)
+          DO UPDATE SET title=EXCLUDED.title,summary=EXCLUDED.summary,
+            cover_image_url=CASE WHEN EXCLUDED.cover_image_url<>'' THEN EXCLUDED.cover_image_url ELSE guide_translations.cover_image_url END,
+            image_urls=CASE WHEN EXCLUDED.image_urls<>'' THEN EXCLUDED.image_urls ELSE guide_translations.image_urls END,
+            seo_title=EXCLUDED.seo_title,alt_text=EXCLUDED.alt_text,status=EXCLUDED.status,updated_at=NOW()`, [scope.tenant_id,scope.platform_id,guideId,row.locale,row.title,row.summary,imageUrl,row.seo_title,row.alt_text,effectiveStatus]);
+        if (existingTranslation) updated += 1; else created += 1;
+        if (row.locale === policy.defaultLocale) {
+          await q(`UPDATE guides SET title=$1,summary=$2,category_id=$3,priority=$4,button_ids=$5,cover_image_url=CASE WHEN $6<>'' THEN $6 ELSE cover_image_url END,image_urls=CASE WHEN $6<>'' THEN $6 ELSE image_urls END,language=$7,updated_at=NOW() WHERE id=$8`, [row.title,row.summary,row.category_id,row.sort_order,buttonIdsText,imageUrl,policy.defaultLocale,guideId]);
+        }
       }
-      for (const warning of row.warnings || []) warnings.push({ row_number: row.row_number, warning });
-      let guideId = row.existing_guide_id;
-      const buttonIdsText = JSON.stringify(row.button_ids || []);
-      if (!guideId) {
-        const inserted = (await q(`INSERT INTO guides(title,slug,summary,body,image_urls,keywords,language,priority,status,category_id,button_ids,tenant_id,platform_id,updated_at) VALUES($1,$2,$3,'',$4,'',$5,$6,'draft',$7,$8,$9,$10,NOW()) RETURNING id`, [row.title,row.slug,row.summary,imageUrl ? imageUrl : '',policy.defaultLocale,row.sort_order,row.category_id,buttonIdsText,scope.tenant_id,scope.platform_id])).rows[0];
-        guideId = Number(inserted.id);
-      } else {
-        await q(`UPDATE guides SET category_id=$1,priority=$2,button_ids=$3,updated_at=NOW() WHERE id=$4 AND tenant_id=$5 AND platform_id=$6`, [row.category_id,row.sort_order,buttonIdsText,guideId,scope.tenant_id,scope.platform_id]);
-      }
-      await q('DELETE FROM guide_action_buttons WHERE guide_id=$1', [guideId]);
-      let buttonOrder = 100;
-      for (const buttonId of row.button_ids || []) await q('INSERT INTO guide_action_buttons(guide_id,button_id,sort_order) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [guideId, buttonId, buttonOrder++]);
-      const effectiveStatus = statusMode === 'preserve' ? row.status : 'draft';
-      const existingTranslation = (await q('SELECT id,cover_image_url,image_urls,body,rich_json,rich_html FROM guide_translations WHERE guide_id=$1 AND platform_id=$2 AND locale=$3 LIMIT 1', [guideId,scope.platform_id,row.locale])).rows[0];
-      if (existingTranslation) {
-        await q(`UPDATE guide_translations SET title=$1,summary=$2,cover_image_url=CASE WHEN $3<>'' THEN $3 ELSE cover_image_url END,image_urls=CASE WHEN $3<>'' THEN $3 ELSE image_urls END,seo_title=$4,alt_text=$5,status=$6,updated_at=NOW() WHERE id=$7 AND tenant_id=$8 AND platform_id=$9`, [row.title,row.summary,imageUrl,row.seo_title,row.alt_text,effectiveStatus,existingTranslation.id,scope.tenant_id,scope.platform_id]);
-        updated += 1;
-      } else {
-        await q(`INSERT INTO guide_translations(tenant_id,platform_id,guide_id,locale,title,summary,body,rich_json,rich_html,image_urls,cover_image_url,keywords,seo_title,seo_description,alt_text,status,updated_at) VALUES($1,$2,$3,$4,$5,$6,'','','',$7,$7,'',$8,'',$9,$10,NOW())`, [scope.tenant_id,scope.platform_id,guideId,row.locale,row.title,row.summary,imageUrl,row.seo_title,row.alt_text,effectiveStatus]);
-        created += 1;
-      }
-      if (row.locale === policy.defaultLocale) {
-        await q(`UPDATE guides SET title=$1,summary=$2,category_id=$3,priority=$4,button_ids=$5,cover_image_url=CASE WHEN $6<>'' THEN $6 ELSE cover_image_url END,image_urls=CASE WHEN $6<>'' THEN $6 ELSE image_urls END,language=$7,updated_at=NOW() WHERE id=$8`, [row.title,row.summary,row.category_id,row.sort_order,buttonIdsText,imageUrl,policy.defaultLocale,guideId]);
-      }
+      const result = { ok: true, kind: 'guide', filename: name, total_rows: validated.length, created, updated, skipped, error_rows: errors.length, warning_rows: warnings.length, errors, warnings };
+      await recordHistory(q, scope, 'guide', name, result);
+      return result;
+    });
+  } catch (error) {
+    if (error?.code === '23505') {
+      const where = activeRowNumber ? ` on row ${activeRowNumber}` : '';
+      throw Object.assign(new Error(`Guide import conflict${where}. Re-preview the workbook and retry. No workbook changes were saved.`), { status: 409, code: 'GUIDE_IMPORT_CONFLICT' });
     }
-    const result = { ok: true, kind: 'guide', filename: name, total_rows: validated.length, created, updated, skipped, error_rows: errors.length, warning_rows: warnings.length, errors, warnings };
-    await recordHistory(q, scope, 'guide', name, result);
-    return result;
-  });
+    throw error;
+  }
 }
 
 export async function exportFaqWorkbook(env, scope) {
