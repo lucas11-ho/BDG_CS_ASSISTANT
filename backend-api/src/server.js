@@ -18,10 +18,17 @@ import { startAiJobWorker } from './ai-job-worker.js';
 import { allowedOrigin, databaseDescriptor, getRuntimeEnv, validateRuntimeEnv } from './env.js';
 import { createR2Adapter } from './r2-adapter.js';
 import { handleBulkContentRoute } from './bulk-content-studio.js';
+import {
+  closeFaqTopicPools,
+  enrichFaqTopicResponse,
+  faqTopicFromJsonBody,
+  handleFaqTopicBulkRoute,
+  persistFaqTopicFromResponse,
+} from './faq-topics.js';
 
 const env = getRuntimeEnv();
 // Carries forward the 1.18.2-ai-knowledge-library runtime contract while the edge release marker advances.
-const API_VERSION = '1.18.4-r2-bulk-locale-schema-compat';
+const API_VERSION = '1.18.5-localized-faq-topics';
 const API_FEATURES = [
   'cs-workspace-shared-domain',
   'staff-self-profile-management',
@@ -174,7 +181,9 @@ const API_FEATURES = [
   'faq-guide-bulk-content-studio',
   'guide-embedded-cell-image-import',
   'bulk-content-cors-preflight',
-  'bulk-content-locale-schema-compat'
+  'bulk-content-locale-schema-compat',
+  'localized-faq-topics',
+  'faq-topic-excel-import-export'
 ];
 validateRuntimeEnv(env);
 env.GUIDE_IMAGES = createR2Adapter(env);
@@ -258,6 +267,7 @@ async function authenticatedBulkResponse(request, env, url, path, requestHeaders
   if (isImport && path.includes('/guide/') && access.can_upload_guides !== true) {
     return new Response(JSON.stringify({ ok: false, error: 'Guide upload permission is required for this platform', code: 'GUIDE_UPLOAD_DENIED' }), { status: 403, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
   }
+  if (path.startsWith('/admin/content-bulk/faq/')) return handleFaqTopicBulkRoute(request, env, scope);
   return handleBulkContentRoute(request, env, scope);
 }
 
@@ -296,10 +306,21 @@ const server = http.createServer(async (req, res) => {
       signal:requestAbort.signal,
       ...(body ? { duplex: 'half' } : {}),
     });
-    const response = path.startsWith('/admin/content-bulk/') && request.method.toUpperCase() !== 'OPTIONS'
+    let response = path.startsWith('/admin/content-bulk/') && request.method.toUpperCase() !== 'OPTIONS'
       ? await authenticatedBulkResponse(request, env, url, path, requestHeaders, requestAbort.signal)
       : await api.fetch(request, env);
     if (!response) throw Object.assign(new Error('Bulk content route was not found'), { status: 404 });
+
+    const method = request.method.toUpperCase();
+    const isFaqWrite = response.ok && ((method === 'POST' && path === '/admin/faqs') || (method === 'PUT' && /^\/admin\/faqs\/\d+$/.test(path)));
+    const isFaqRead = response.ok && method === 'GET' && (path === '/admin/faqs' || path === '/faqs' || path === '/public/faqs');
+    if (isFaqWrite) {
+      await persistFaqTopicFromResponse(response, env, faqTopicFromJsonBody(body));
+      response = await enrichFaqTopicResponse(response, env);
+    } else if (isFaqRead) {
+      response = await enrichFaqTopicResponse(response, env);
+    }
+
     const headers = Object.fromEntries(response.headers.entries());
     headers['x-request-id'] = requestId;
     headers['x-api-version'] = API_VERSION;
@@ -367,6 +388,7 @@ async function shutdown(signal) {
     await aiWorker.close().catch(() => undefined);
     await supportGateway.close().catch(() => undefined);
     await closeSupportEventBus().catch(() => undefined);
+    await closeFaqTopicPools().catch(() => undefined);
     await closeDatabasePools();
     process.exit(0);
   });

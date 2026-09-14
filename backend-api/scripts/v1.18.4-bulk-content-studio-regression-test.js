@@ -18,7 +18,7 @@ async function headersFrom(buffer, sheetName) {
   return sheet.getRow(1).values.slice(1).map((value) => String(value || ''));
 }
 
-await test('FAQ template exposes only the requested import columns', async () => {
+await test('Legacy FAQ template contract remains available inside the v1.18.4 module', async () => {
   const headers = await headersFrom(await buildFaqTemplate(), 'FAQ');
   assert.deepEqual(headers, ['Question', 'Locale', 'Answer', 'Status']);
   assert.ok(!headers.includes('Actions'));
@@ -92,10 +92,9 @@ await test('Platform locale ordering schema matches the bulk locale-policy query
   assert.ok(migration.includes('idx_platform_locales_enabled_order'));
 });
 
-await test('Production gating waits for the v1.18.4-r2 schema compatibility release marker', async () => {
+await test('Production gating still reads the release marker from server.js after later releases', async () => {
   const server = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
   const reader = fs.readFileSync(new URL('../../scripts/ci/read-api-version.mjs', import.meta.url), 'utf8');
-  assert.ok(server.includes("const API_VERSION = '1.18.4-r2-bulk-locale-schema-compat'"));
   assert.ok(server.includes("'bulk-content-locale-schema-compat'"));
   assert.ok(server.includes('version: API_VERSION'));
   assert.ok(reader.includes('backend-api/src/server.js'));

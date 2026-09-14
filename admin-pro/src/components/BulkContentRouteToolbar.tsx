@@ -49,7 +49,7 @@ export default function BulkContentRouteToolbar() {
 
   const title = kind === "faq" ? "FAQ Excel Import / Export" : "Guide Excel Import / Export";
   const description = kind === "faq"
-    ? "Preview Question + Locale changes before importing. Spreadsheet content imports as Draft by default."
+    ? "Preview Question + Locale changes before importing. Topic is locale-specific, so use the same language as each FAQ row. Spreadsheet content imports as Draft by default."
     : "Stable slug + Guide locale identifies each Guide. Insert-image-in-cell is supported when the exported XLSX exposes the embedded image; unreadable images are reported as warnings instead of failing the row.";
 
   const beginPreview = async (nextFile: File) => {
@@ -103,6 +103,7 @@ export default function BulkContentRouteToolbar() {
         { title: "Action", dataIndex: "action", width: 90, render: (value: string) => <Tag color={actionColor(value)}>{String(value || "").toUpperCase()}</Tag> },
         { title: "Question", dataIndex: "question", ellipsis: true },
         { title: "Locale", dataIndex: "locale", width: 110 },
+        { title: "Topic", dataIndex: "topic", width: 150, ellipsis: true },
         { title: "Status", dataIndex: "status", width: 110 },
         { title: "Error", dataIndex: "error", ellipsis: true, render: (value: string) => value ? <span style={{ color: "#ff7875" }}>{value}</span> : "—" },
       ]
@@ -149,7 +150,9 @@ export default function BulkContentRouteToolbar() {
         showIcon
         type={preview?.error_rows ? "warning" : "info"}
         message="Preview only — nothing has been written yet"
-        description="Rows with validation errors are skipped. Unknown Guide buttons are warnings. By default every imported row becomes Draft so you can review it in Admin before publishing."
+        description={kind === "faq"
+          ? "Rows with validation errors are skipped. FAQ Topic is saved per locale, so translate the Topic label in each locale row. By default every imported row becomes Draft so you can review it in Admin before publishing."
+          : "Rows with validation errors are skipped. Unknown Guide buttons are warnings. By default every imported row becomes Draft so you can review it in Admin before publishing."}
         style={{ marginBottom: 14 }}
       />
       <Space size="large" wrap style={{ marginBottom: 14 }}>
@@ -170,7 +173,7 @@ export default function BulkContentRouteToolbar() {
         columns={previewColumns as any}
         dataSource={preview?.rows || []}
         pagination={{ pageSize: 20, showSizeChanger: false }}
-        scroll={{ x: 980 }}
+        scroll={{ x: 1080 }}
       />
     </Modal>
 
