@@ -21,15 +21,14 @@ const dataPage = source("../../admin-pro/src/components/DataPage.tsx");
 const auditLogs = source("../../admin-pro/src/routes/_admin.audit-logs.tsx");
 const messages = source("../../admin-pro/src/i18n/messages.ts");
 
-for (const route of [
+for (const marker of [
   "/admin/me/2fa/setup",
   "/admin/me/2fa/enable",
   "/admin/me/2fa/disable",
-  "/admin/admin-users/:id/force-logout",
-  "/admin/admin-users/:id/reset-2fa",
+  "/force-logout$",
+  "/reset-2fa$",
 ]) {
-  const marker = route.replace(":id", "");
-  assert.ok(core.includes(marker), "missing security route marker " + route);
+  assert.ok(core.includes(marker), "missing security route marker " + marker);
 }
 assert.ok(core.includes("requireOwnerStepUp"));
 assert.ok(core.includes("OWNER_2FA_REQUIRED"));
