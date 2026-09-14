@@ -38,7 +38,7 @@ const { Pool } = pg;
 const scryptAsync = promisify(scryptCallback);
 const pools = new Map();
 
-const VERSION = '1.18.2-ai-knowledge-library';
+const VERSION = '1.19.1-admin-trust-security';
 const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
 const PBKDF2_ITERATIONS = 60000; // Compatibility cap only; new admin passwords use Worker-safe salted SHA-256.
 const DEFAULT_SUPPORT = 'https://t.me/your_support_bot';
@@ -214,6 +214,7 @@ async function route(request, env, url) {
   // resolves to the protected BDG platform; regular tenant users must use
   // their generated /p/<route-key>/admin URL.
   const scope = requiresPlatformScope(path) ? await resolveAdminPlatformScope(env, request, admin) : null;
+  if (scope) scope.actor_email = admin?.email || '';
   if (scope && method !== 'GET') requirePlatformWrite(scope);
 
   if (path.startsWith('/admin/support')) {
@@ -4921,7 +4922,7 @@ async function cleanupDuplicateQuickReplies(env,scope) {
   return { ok: true, deleted: rows.length };
 }
 
-async function audit(env, action, type, id, details='', scope=null) { try { if (scope) await q(env, `INSERT INTO admin_audit_logs(actor_email,action,entity_type,entity_id,details,tenant_id,platform_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, ['admin', action, type, String(id ?? ''), details,scope.tenant_id,scope.platform_id]); else await q(env, `INSERT INTO admin_audit_logs(actor_email,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)`, ['admin', action, type, String(id ?? ''), details]); } catch (_) {} }
+async function audit(env, action, type, id, details='', scope=null) { try { const actorEmail=String(scope?.actor_email || 'admin'); if (scope) await q(env, `INSERT INTO admin_audit_logs(actor_email,action,entity_type,entity_id,details,tenant_id,platform_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, [actorEmail, action, type, String(id ?? ''), details,scope.tenant_id,scope.platform_id]); else await q(env, `INSERT INTO admin_audit_logs(actor_email,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)`, [actorEmail, action, type, String(id ?? ''), details]); } catch (_) {} }
 async function listAuditLogs(env,scope){ const {rows}=await q(env,'SELECT * FROM admin_audit_logs WHERE tenant_id=$1 AND platform_id=$2 ORDER BY id DESC LIMIT 150',[scope.tenant_id,scope.platform_id]); return rows.map(r=>({id:r.id,actor_email:r.actor_email,action:r.action,entity_type:r.entity_type,entity_id:r.entity_id,details:r.details,created_at:String(r.created_at)})); }
 
 
