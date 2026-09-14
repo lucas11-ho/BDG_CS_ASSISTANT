@@ -170,7 +170,7 @@ async function route(request, env, url) {
   if (path.startsWith('/admin/')) admin = await requireAdmin(request, env);
 
   // Current admin security endpoints
-  if (method === 'GET' && path === '/admin/me') return json({ ok: true, user: admin }, 200, env);
+  if (method === 'GET' && path === '/admin/me') return json({ ok: true, user: await getOwnAdminProfile(env, admin) }, 200, env);
   if (method === 'POST' && path === '/admin/me/password') return json(await changeOwnPassword(env, admin, await readJson(request)), 200, env);
   if (method === 'POST' && path === '/admin/me/2fa/setup') return json(await setupOwn2fa(env, admin), 200, env);
   if (method === 'POST' && path === '/admin/me/2fa/enable') return json(await enableOwn2fa(env, admin, await readJson(request)), 200, env);
@@ -399,6 +399,8 @@ async function route(request, env, url) {
   if (method === 'POST' && path === '/admin/admin-users') { requireOwner(admin); return json(await createAdminUser(env, await readJson(request)), 200, env); }
   if (method === 'PUT' && /^\/admin\/admin-users\/\d+$/.test(path)) { requireOwner(admin); return json(await updateAdminUser(env, idFromPath(path), await readJson(request)), 200, env); }
   if (method === 'POST' && /^\/admin\/admin-users\/\d+\/password$/.test(path)) { requireOwner(admin); return json(await changeAdminPassword(env, idFromParts(path, 3), await readJson(request)), 200, env); }
+  if (method === 'POST' && /^\/admin\/admin-users\/\d+\/force-logout$/.test(path)) { requireOwner(admin); return json(await forceLogoutAdmin(env, admin, idFromParts(path, 3)), 200, env); }
+  if (method === 'POST' && /^\/admin\/admin-users\/\d+\/reset-2fa$/.test(path)) { requireOwner(admin); return json(await resetAdmin2fa(env, admin, idFromParts(path, 3), await readJson(request)), 200, env); }
   if (method === 'DELETE' && /^\/admin\/admin-users\/\d+$/.test(path)) { requireOwner(admin); return json(await deleteAdminUser(env, idFromPath(path)), 200, env); }
 
   // Child-platform users are memberships, not global operators. A tenant or
@@ -6380,12 +6382,29 @@ async function verifyTotp(secret, code) {
   for (const off of [-1,0,1]) if (await totpCode(secret, off) === clean) return true;
   return false;
 }
+async function getOwnAdminProfile(env, admin) {
+  const row = (await q(env, 'SELECT id,name,email,role,is_active,twofa_enabled,last_login_at,created_at,updated_at FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
+  if (!row) bad('Admin not found', 404, 'ADMIN_NOT_FOUND');
+  return adminUserOut(row);
+}
+async function securityAudit(env, actor, action, target, details) {
+  try {
+    await q(env, 'INSERT INTO admin_audit_logs(actor_email,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [String(actor?.email || 'admin'), action, 'admin_users', String(target ?? ''), details]);
+  } catch (_) {}
+}
+async function requireOwnerStepUp(env, admin, p = {}) {
+  const owner = (await q(env, 'SELECT id,email,twofa_enabled,twofa_secret FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
+  if (!owner) bad('Owner account not found', 404, 'OWNER_NOT_FOUND');
+  if (owner.twofa_enabled === true && !await verifyTotp(owner.twofa_secret, p.owner_code || p.twofa_code || p.otp || p.code)) {
+    bad('Enter the owner 2FA code to continue', 403, 'OWNER_2FA_REQUIRED');
+  }
+}
 async function setupOwn2fa(env, admin) {
   const secret = randomBase32Secret(20);
-  await q(env, 'UPDATE admin_users SET twofa_secret=$1, updated_at=NOW() WHERE lower(email)=lower($2)', [secret, admin.email]);
+  await q(env, 'UPDATE admin_users SET twofa_secret=$1, twofa_enabled=FALSE, updated_at=NOW() WHERE lower(email)=lower($2)', [secret, admin.email]);
   const issuer = encodeURIComponent(appName(env));
   const account = encodeURIComponent(admin.email);
-  await audit(env, '2fa_setup', 'admin_users', admin.email, '2FA setup secret generated');
+  await securityAudit(env, admin, '2fa_setup', admin.email, '2FA setup secret generated');
   return { ok: true, secret, otpauth_url: `otpauth://totp/${issuer}:${account}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30` };
 }
 async function enableOwn2fa(env, admin, p = {}) {
@@ -6393,7 +6412,7 @@ async function enableOwn2fa(env, admin, p = {}) {
   if (!row?.twofa_secret) bad('Please generate 2FA setup first', 400);
   if (!await verifyTotp(row.twofa_secret, p.code || p.twofa_code || p.otp)) bad('Invalid 2FA code', 400);
   await q(env, 'UPDATE admin_users SET twofa_enabled=TRUE, updated_at=NOW() WHERE id=$1', [row.id]);
-  await audit(env, '2fa_enabled', 'admin_users', row.id, '2FA enabled');
+  await securityAudit(env, admin, '2fa_enabled', row.id, '2FA enabled');
   return { ok: true };
 }
 async function disableOwn2fa(env, admin, p = {}) {
@@ -6401,7 +6420,7 @@ async function disableOwn2fa(env, admin, p = {}) {
   if (!row) bad('Admin not found', 404);
   if (row.twofa_enabled && !await verifyTotp(row.twofa_secret, p.code || p.twofa_code || p.otp)) bad('Invalid 2FA code', 400);
   await q(env, 'UPDATE admin_users SET twofa_enabled=FALSE, twofa_secret=NULL, updated_at=NOW() WHERE id=$1', [row.id]);
-  await audit(env, '2fa_disabled', 'admin_users', row.id, '2FA disabled');
+  await securityAudit(env, admin, '2fa_disabled', row.id, '2FA disabled');
   return { ok: true };
 }
 async function changeOwnPassword(env, admin, p = {}) {
@@ -6411,15 +6430,24 @@ async function changeOwnPassword(env, admin, p = {}) {
   await audit(env, 'change_own_password', 'admin_users', admin.email, 'Own password changed and old sessions revoked');
   return { ok: true };
 }
-async function forceLogoutAdmin(env, id) {
+async function forceLogoutAdmin(env, admin, id) {
+  const target = (await q(env, 'SELECT id,email,role FROM admin_users WHERE id=$1 LIMIT 1', [id])).rows[0];
+  if (!target) bad('Admin not found', 404, 'ADMIN_NOT_FOUND');
+  if (String(target.email).toLowerCase() === String(admin.email).toLowerCase()) bad('Use Sign out for your own account', 400, 'ADMIN_SELF_ACTION_DENIED');
   await q(env, 'UPDATE admin_users SET session_version=COALESCE(session_version,0)+1, updated_at=NOW() WHERE id=$1', [id]);
-  await audit(env, 'force_logout', 'admin_users', id, 'Owner forced admin logout');
-  return { ok: true };
+  await q(env, 'UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,NOW()) WHERE lower(admin_email)=lower($1) AND revoked_at IS NULL', [target.email]).catch(() => undefined);
+  await securityAudit(env, admin, 'force_logout', id, `Owner forced logout for ${target.email}`);
+  return { ok: true, admin_id: Number(target.id), sessions_revoked: true };
 }
-async function resetAdmin2fa(env, id) {
-  await q(env, 'UPDATE admin_users SET twofa_enabled=FALSE, twofa_secret=NULL, updated_at=NOW() WHERE id=$1', [id]);
-  await audit(env, 'reset_2fa', 'admin_users', id, 'Owner reset admin 2FA');
-  return { ok: true };
+async function resetAdmin2fa(env, admin, id, p = {}) {
+  const target = (await q(env, 'SELECT id,email,role,twofa_enabled FROM admin_users WHERE id=$1 LIMIT 1', [id])).rows[0];
+  if (!target) bad('Admin not found', 404, 'ADMIN_NOT_FOUND');
+  if (String(target.email).toLowerCase() === String(admin.email).toLowerCase()) bad('Disable your own 2FA from Account & Security', 400, 'ADMIN_SELF_ACTION_DENIED');
+  await requireOwnerStepUp(env, admin, p);
+  await q(env, 'UPDATE admin_users SET twofa_enabled=FALSE, twofa_secret=NULL, session_version=COALESCE(session_version,0)+1, updated_at=NOW() WHERE id=$1', [id]);
+  await q(env, 'UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,NOW()) WHERE lower(admin_email)=lower($1) AND revoked_at IS NULL', [target.email]).catch(() => undefined);
+  await securityAudit(env, admin, 'reset_2fa', id, `Owner reset 2FA and revoked sessions for ${target.email}`);
+  return { ok: true, admin_id: Number(target.id), twofa_enabled: false, sessions_revoked: true };
 }
 async function listAdminSessions(env, admin) {
   requireOwner(admin);
@@ -6487,26 +6515,30 @@ async function clearSession(env, sessionId,scope) { await q(env, 'UPDATE chat_se
 
 async function adminApiDiagnostics(env, scope) {
   const checks = [];
-  async function check(name, endpoint, run) {
+  async function verify(name, endpoint, run) {
     const started = Date.now();
     try {
       const result = await run();
-      checks.push({ name, endpoint, ok: true, status: 'working', ms: Date.now() - started, detail: result });
+      checks.push({ name, endpoint, ok: true, status: 'verified', ms: Date.now() - started, detail: result });
     } catch (err) {
       checks.push({ name, endpoint, ok: false, status: 'failed', ms: Date.now() - started, error: err?.message || String(err) });
     }
   }
-  await check('GET settings', '/settings', async () => Boolean(await getTheme(env, scope)));
-  await check('PUT settings backend', '/admin/settings', async () => 'ready');
-  await check('GET guides', '/admin/guides', async () => (await listAdminGuides(env, scope)).length);
-  await check('DELETE guide backend', '/admin/guides/:id', async () => 'ready');
-  await check('GET AI Content', '/admin/ai-content', async () => (await listAiContent(env, true, scope)).length);
-  await check('DELETE AI Content backend', '/admin/ai-content/:id', async () => 'ready');
-  await check('GET quick replies', '/admin/chat-quick-replies', async () => (await listQuickReplies(env, true, scope)).length);
-  await check('Batch quick reply delete', '/admin/chat-quick-replies/batch-delete', async () => 'ready');
-  await check('Duplicate cleaner', '/admin/chat-quick-replies/cleanup-duplicates', async () => 'ready');
-  await check('R2 upload binding', '/admin/uploads', async () => !!env.GUIDE_IMAGES);
-  return { ok: checks.every(c => c.ok), version: VERSION, checks };
+  function available(name, endpoint, detail) {
+    checks.push({ name, endpoint, ok: true, status: 'available', ms: null, detail });
+  }
+  await verify('Read settings', '/settings', async () => Boolean(await getTheme(env, scope)));
+  available('Update settings route', '/admin/settings', 'Available; no production data was modified');
+  await verify('Read guides', '/admin/guides', async () => (await listAdminGuides(env, scope)).length);
+  available('Delete guide route', '/admin/guides/:id', 'Available; destructive diagnostics are intentionally skipped');
+  await verify('Read Menu & Images', '/admin/ai-content', async () => (await listAiContent(env, true, scope)).length);
+  available('Delete Menu & Images route', '/admin/ai-content/:id', 'Available; destructive diagnostics are intentionally skipped');
+  await verify('Read quick replies', '/admin/chat-quick-replies', async () => (await listQuickReplies(env, true, scope)).length);
+  available('Batch quick reply delete route', '/admin/chat-quick-replies/batch-delete', 'Available; destructive diagnostics are intentionally skipped');
+  available('Duplicate cleaner route', '/admin/chat-quick-replies/cleanup-duplicates', 'Available; destructive diagnostics are intentionally skipped');
+  if (env.GUIDE_IMAGES) checks.push({ name: 'Guide image storage', endpoint: '/admin/uploads', ok: true, status: 'configured', ms: null, detail: 'R2 binding is configured; uploads are not written by diagnostics' });
+  else checks.push({ name: 'Guide image storage', endpoint: '/admin/uploads', ok: true, status: 'not_enabled', ms: null, detail: 'R2 binding is not configured' });
+  return { ok: checks.every(c => c.ok), version: VERSION, checked_at: new Date().toISOString(), checks };
 }
 
 async function systemHealth(env) {
