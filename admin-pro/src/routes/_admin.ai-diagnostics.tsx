@@ -264,10 +264,13 @@ function DiagnosticsPage() {
                 { title: "Endpoint", dataIndex: "endpoint" },
                 {
                   title: "Status",
-                  render: (_: any, row: any) =>
-                    row.ok ? <Tag color="success">Working</Tag> : <Tag color="error">Failed</Tag>,
+                  render: (_: any, row: any) => {
+                    const status = String(row.status || (row.ok ? "verified" : "failed"));
+                    const color = status === "failed" ? "error" : status === "verified" || status === "configured" ? "success" : "warning";
+                    return <Tag color={color}>{status.replaceAll("_", " ")}</Tag>;
+                  },
                 },
-                { title: "Time", dataIndex: "ms", render: (value: number) => `${value || 0} ms` },
+                { title: "Time", dataIndex: "ms", render: (value: number | null) => Number.isFinite(value) ? String(value) + " ms" : "—" },
                 { title: "Detail", render: (_: any, row: any) => row.error || String(row.detail ?? "") },
               ]}
             />
