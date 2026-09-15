@@ -106,6 +106,7 @@ jobs:
           npm --prefix backend-api run test:v1184-bulk-content
           npm --prefix backend-api run test:v1191-admin-trust
           npm --prefix backend-api run test:v1202-admin-security
+          npm --prefix backend-api run test:v1210-localized-analytics
           npm --prefix backend-api run test:security
           npm --prefix backend-api run test:chat-reliability
           npm --prefix backend-api run test:structured
