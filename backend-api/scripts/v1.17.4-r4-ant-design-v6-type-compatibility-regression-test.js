@@ -39,7 +39,7 @@ test('Rich Knowledge Editor uses vertical Divider orientation', () => assert.equ
 test('Admin source contains no deprecated Divider type="vertical" usage', () => assert.ok(!/<Divider[^>]*\btype=["']vertical["']/i.test(adminSource)));
 test('Existing Guide image Divider titlePlacement usage remains compatible', () => {
   const source = read('admin-pro', 'src', 'routes', '_admin.guide-images.tsx');
-  assert.ok(source.includes('<Divider titlePlacement="start">Motion media cover</Divider>'));
+  assert.match(source, /<Divider titlePlacement="start">Motion media cover(?: \/ custom override)?<\/Divider>/);
   assert.ok(source.includes('<Divider titlePlacement="start">Text motion</Divider>'));
 });
 test('Normal CI runs the R3 dependency-security guard before R4 compatibility guard', () => assert.ok(ci.indexOf('npm run test:v1174r3') < ci.indexOf('npm run test:v1174r4')));
