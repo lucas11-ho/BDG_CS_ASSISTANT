@@ -44,8 +44,10 @@ for (const token of [
   'handleTrafficPublicRoute',
   'enrichCategoryListResponse',
   'closeLocalizedContentAnalyticsPools',
+  'content-analytics-cors-preflight',
 ]) assert.ok(server.includes(token), `server is not wired for ${token}`);
 assert.ok(server.includes("path.startsWith('/admin/content-bulk/') && request.method.toUpperCase() !== 'OPTIONS'"), 'legacy bulk-content dispatch contract must remain intact');
+assert.ok(server.includes("const isContentAnalyticsAdmin = method !== 'OPTIONS' && ("), 'localized category and analytics Admin routes must bypass authentication on CORS preflight');
 
 for (const token of [
   'title: "Locale"',

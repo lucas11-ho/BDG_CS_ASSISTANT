@@ -191,7 +191,8 @@ const API_FEATURES = [
   'localized-faq-topics',
   'faq-topic-excel-import-export',
   'localized-categories',
-  'first-party-traffic-analytics'
+  'first-party-traffic-analytics',
+  'content-analytics-cors-preflight'
 ];
 validateRuntimeEnv(env);
 env.GUIDE_IMAGES = createR2Adapter(env);
@@ -345,9 +346,11 @@ const server = http.createServer(async (req, res) => {
     });
     const method = request.method.toUpperCase();
     const isTrafficWrite = method === 'POST' && (path === '/public/analytics/pageview' || path === '/public/analytics/heartbeat');
-    const isContentAnalyticsAdmin = path === '/admin/analytics/summary'
+    const isContentAnalyticsAdmin = method !== 'OPTIONS' && (
+      path === '/admin/analytics/summary'
       || path === '/admin/categories/locales'
-      || /^\/admin\/categories\/\d+\/translations(?:\/[^/]+)?$/.test(path);
+      || /^\/admin\/categories\/\d+\/translations(?:\/[^/]+)?$/.test(path)
+    );
     let response = isTrafficWrite
       ? await handleTrafficPublicRoute(request, env)
       : isContentAnalyticsAdmin
