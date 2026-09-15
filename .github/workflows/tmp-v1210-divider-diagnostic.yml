@@ -1,0 +1,32 @@
+name: Temporary v1.21.0 Divider diagnostic
+
+on:
+  push:
+    branches:
+      - feature/v1.21.0-localized-categories-analytics
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find incompatible Divider orientation
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          pattern = re.compile(r'<Divider[^>]*\borientation=["\'\"](?:left|right|center)["\'\"]', re.I)
+          found = False
+          for path in Path('admin-pro/src').rglob('*'):
+              if path.suffix.lower() not in {'.ts', '.tsx', '.js', '.jsx'}:
+                  continue
+              text = path.read_text(encoding='utf-8')
+              for line_no, line in enumerate(text.splitlines(), 1):
+                  if pattern.search(line):
+                      found = True
+                      print(f'OFFENDER {path}:{line_no}: {line.strip()}')
+          if not found:
+              print('NO_OFFENDER_FOUND')
