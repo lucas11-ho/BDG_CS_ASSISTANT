@@ -352,7 +352,7 @@ const server = http.createServer(async (req, res) => {
       ? await handleTrafficPublicRoute(request, env)
       : isContentAnalyticsAdmin
         ? await authenticatedContentAnalyticsResponse(request, env, url, path, requestHeaders, requestAbort.signal)
-        : path.startsWith('/admin/content-bulk/') && method !== 'OPTIONS'
+        : path.startsWith('/admin/content-bulk/') && request.method.toUpperCase() !== 'OPTIONS'
           ? await authenticatedBulkResponse(request, env, url, path, requestHeaders, requestAbort.signal)
           : await api.fetch(request, env);
     if (!response) throw Object.assign(new Error('Bulk content route was not found'), { status: 404 });
