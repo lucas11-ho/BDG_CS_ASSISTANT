@@ -181,7 +181,7 @@ function CategoriesPage() {
         <Form.Item name="name" label={`Name · ${selectedLocale.toUpperCase()}`} rules={[{ required: true, message: "Category name is required" }]}><Input maxLength={120} /></Form.Item>
         <Form.Item name="description" label={`Description · ${selectedLocale.toUpperCase()}`}><Input.TextArea rows={3} maxLength={4000} /></Form.Item>
         {!sameLocale(selectedLocale, defaultLocale) && editing?.id && translationFor(selectedLocale) ? <Button danger size="small" onClick={() => void removeLocale()} style={{ marginBottom: 12 }}>Remove this translation</Button> : null}
-        <Divider orientation="left">Shared category settings</Divider>
+        <Divider titlePlacement="left">Shared category settings</Divider>
         <Text type="secondary">These settings are shared by every language.</Text>
         <Form.Item name="slug" label="Stable slug" rules={[{ required: true }]} style={{ marginTop: 12 }}><Input /></Form.Item>
         <Form.Item name="icon" label="Fallback built-in icon"><Input placeholder="target" /></Form.Item>
