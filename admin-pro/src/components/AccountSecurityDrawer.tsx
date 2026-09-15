@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -39,6 +39,10 @@ type SetupResult = {
   otpauth_url: string;
 };
 
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export default function AccountSecurityDrawer({ open, onClose }: Props) {
   const { t } = useAdminI18n();
   const [profile, setProfile] = useState<AdminProfile | null>(null);
@@ -46,26 +50,28 @@ export default function AccountSecurityDrawer({ open, onClose }: Props) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = async () => {
-    const result: any = await api.getMe();
+  const load = useCallback(async () => {
+    const result = (await api.getMe()) as AdminProfile & { user?: AdminProfile };
     setProfile(result?.user || result || null);
-  };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     setSetup(null);
     setCode("");
-    load().catch((error: any) => message.error(error?.message || t("Failed to load account security")));
-  }, [open]);
+    load().catch((error: unknown) =>
+      message.error(errorMessage(error, t("Failed to load account security"))),
+    );
+  }, [load, open, t]);
 
   const beginSetup = async () => {
     setBusy(true);
     try {
-      const result: any = await api.setup2FA();
+      const result = (await api.setup2FA()) as SetupResult;
       setSetup({ secret: String(result.secret || ""), otpauth_url: String(result.otpauth_url || "") });
       setCode("");
-    } catch (error: any) {
-      message.error(error?.message || t("Unable to start 2FA setup"));
+    } catch (error: unknown) {
+      message.error(errorMessage(error, t("Unable to start 2FA setup")));
     } finally {
       setBusy(false);
     }
@@ -83,8 +89,8 @@ export default function AccountSecurityDrawer({ open, onClose }: Props) {
       setSetup(null);
       setCode("");
       await load();
-    } catch (error: any) {
-      message.error(error?.message || t("Unable to enable 2FA"));
+    } catch (error: unknown) {
+      message.error(errorMessage(error, t("Unable to enable 2FA")));
     } finally {
       setBusy(false);
     }
@@ -101,8 +107,8 @@ export default function AccountSecurityDrawer({ open, onClose }: Props) {
       message.success(t("Two-factor authentication disabled"));
       setCode("");
       await load();
-    } catch (error: any) {
-      message.error(error?.message || t("Unable to disable 2FA"));
+    } catch (error: unknown) {
+      message.error(errorMessage(error, t("Unable to disable 2FA")));
     } finally {
       setBusy(false);
     }

@@ -27,8 +27,7 @@ import {
 } from './faq-topics.js';
 
 const env = getRuntimeEnv();
-// Carries forward the 1.18.2-ai-knowledge-library runtime contract while the edge release marker advances.
-const API_VERSION = '1.18.5-localized-faq-topics';
+const API_VERSION = '1.19.1-admin-trust-security';
 const API_FEATURES = [
   'cs-workspace-shared-domain',
   'staff-self-profile-management',

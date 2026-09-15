@@ -59,6 +59,15 @@ await test('Bulk service keeps preview, apply, export and history routes separat
   assert.ok(source.includes('No readable image found'));
 });
 
+await test('Guide import atomically reuses one parent for multiple locales sharing a stable slug', async () => {
+  const source = fs.readFileSync(new URL('../src/bulk-content-studio.js', import.meta.url), 'utf8');
+  assert.ok(source.includes('ON CONFLICT (platform_id,slug) WHERE deleted_at IS NULL'));
+  assert.ok(source.includes('ON CONFLICT (platform_id,guide_id,locale)'));
+  assert.ok(source.includes("cover_image_url=CASE WHEN EXCLUDED.cover_image_url<>'' THEN EXCLUDED.cover_image_url ELSE guide_translations.cover_image_url END"));
+  assert.ok(source.includes("code: 'GUIDE_IMPORT_CONFLICT'"));
+  assert.ok(source.includes('No workbook changes were saved.'));
+});
+
 await test('Admin exposes preview-first bulk controls only on FAQ and Guide routes', async () => {
   const shell = fs.readFileSync(new URL('../../admin-pro/src/routes/_admin.tsx', import.meta.url), 'utf8');
   const toolbar = fs.readFileSync(new URL('../../admin-pro/src/components/BulkContentRouteToolbar.tsx', import.meta.url), 'utf8');

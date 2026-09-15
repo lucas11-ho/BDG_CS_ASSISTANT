@@ -397,12 +397,12 @@ async function route(request, env, url) {
 
   // Owner/Admin users
   if (method === 'GET' && path === '/admin/admin-users') { requireOwner(admin); return json(await listAdminUsers(env), 200, env); }
-  if (method === 'POST' && path === '/admin/admin-users') { requireOwner(admin); return json(await createAdminUser(env, await readJson(request)), 200, env); }
-  if (method === 'PUT' && /^\/admin\/admin-users\/\d+$/.test(path)) { requireOwner(admin); return json(await updateAdminUser(env, idFromPath(path), await readJson(request)), 200, env); }
-  if (method === 'POST' && /^\/admin\/admin-users\/\d+\/password$/.test(path)) { requireOwner(admin); return json(await changeAdminPassword(env, idFromParts(path, 3), await readJson(request)), 200, env); }
+  if (method === 'POST' && path === '/admin/admin-users') { requireOwner(admin); return json(await createAdminUser(env, admin, await readJson(request)), 200, env); }
+  if (method === 'PUT' && /^\/admin\/admin-users\/\d+$/.test(path)) { requireOwner(admin); return json(await updateAdminUser(env, admin, idFromPath(path), await readJson(request)), 200, env); }
+  if (method === 'POST' && /^\/admin\/admin-users\/\d+\/password$/.test(path)) { requireOwner(admin); return json(await changeAdminPassword(env, admin, idFromParts(path, 3), await readJson(request)), 200, env); }
   if (method === 'POST' && /^\/admin\/admin-users\/\d+\/force-logout$/.test(path)) { requireOwner(admin); return json(await forceLogoutAdmin(env, admin, idFromParts(path, 3)), 200, env); }
   if (method === 'POST' && /^\/admin\/admin-users\/\d+\/reset-2fa$/.test(path)) { requireOwner(admin); return json(await resetAdmin2fa(env, admin, idFromParts(path, 3), await readJson(request)), 200, env); }
-  if (method === 'DELETE' && /^\/admin\/admin-users\/\d+$/.test(path)) { requireOwner(admin); return json(await deleteAdminUser(env, idFromPath(path)), 200, env); }
+  if (method === 'DELETE' && /^\/admin\/admin-users\/\d+$/.test(path)) { requireOwner(admin); return json(await deleteAdminUser(env, admin, idFromPath(path)), 200, env); }
 
   // Child-platform users are memberships, not global operators. A tenant or
   // platform owner can only see and manage users assigned to this platform.
@@ -435,7 +435,7 @@ async function route(request, env, url) {
   if (method === 'GET' && path === '/admin/chat-logs') return json(await listChatLogs(env, scope), 200, env);
   if (method === 'GET' && path === '/admin/unmatched-questions') return json(await listUnmatchedQuestions(env, scope), 200, env);
   if (method === 'DELETE' && /^\/admin\/unmatched-questions\/\d+$/.test(path)) return json(await deleteById(env, 'unmatched_questions', idFromPath(path), scope), 200, env);
-  if (method === 'GET' && path === '/admin/audit-logs') return json(await listAuditLogs(env, scope), 200, env);
+  if (method === 'GET' && path === '/admin/audit-logs') return json(await listAuditLogs(env, scope, admin), 200, env);
 
   return json({ ok: false, error: 'Not found', path }, 404, env);
 }
@@ -4922,8 +4922,8 @@ async function cleanupDuplicateQuickReplies(env,scope) {
   return { ok: true, deleted: rows.length };
 }
 
-async function audit(env, action, type, id, details='', scope=null) { try { const actorEmail=String(scope?.actor_email || 'admin'); if (scope) await q(env, `INSERT INTO admin_audit_logs(actor_email,action,entity_type,entity_id,details,tenant_id,platform_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, [actorEmail, action, type, String(id ?? ''), details,scope.tenant_id,scope.platform_id]); else await q(env, `INSERT INTO admin_audit_logs(actor_email,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)`, [actorEmail, action, type, String(id ?? ''), details]); } catch (_) {} }
-async function listAuditLogs(env,scope){ const {rows}=await q(env,'SELECT * FROM admin_audit_logs WHERE tenant_id=$1 AND platform_id=$2 ORDER BY id DESC LIMIT 150',[scope.tenant_id,scope.platform_id]); return rows.map(r=>({id:r.id,actor_email:r.actor_email,action:r.action,entity_type:r.entity_type,entity_id:r.entity_id,details:r.details,created_at:String(r.created_at)})); }
+async function audit(env, action, type, id, details='', scope=null) { try { const actorEmail=String(scope?.actor_email || 'admin'); const isScoped=Number.isSafeInteger(Number(scope?.tenant_id))&&Number.isSafeInteger(Number(scope?.platform_id)); if (isScoped) await q(env, `INSERT INTO admin_audit_logs(actor_email,action,entity_type,entity_id,details,tenant_id,platform_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, [actorEmail, action, type, String(id ?? ''), details,scope.tenant_id,scope.platform_id]); else await q(env, `INSERT INTO admin_audit_logs(actor_email,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)`, [actorEmail, action, type, String(id ?? ''), details]); } catch (_) {} }
+async function listAuditLogs(env,scope,admin){ const owner=admin?.role==='owner'; const sql=owner?'SELECT * FROM admin_audit_logs WHERE (tenant_id=$1 AND platform_id=$2) OR (tenant_id IS NULL AND platform_id IS NULL) ORDER BY id DESC LIMIT 150':'SELECT * FROM admin_audit_logs WHERE tenant_id=$1 AND platform_id=$2 ORDER BY id DESC LIMIT 150'; const {rows}=await q(env,sql,[scope.tenant_id,scope.platform_id]); return rows.map(r=>({id:r.id,actor_email:r.actor_email,action:r.action,entity_type:r.entity_type,entity_id:r.entity_id,details:r.details,created_at:String(r.created_at)})); }
 
 
 async function readJson(request) {
@@ -5018,10 +5018,10 @@ async function ensureOwnerAdmin(env, forceDefaultPassword = false) {
   await audit(env, 'owner_created', 'admin_users', email, `Owner account created for ${email}`);
 }
 async function listAdminUsers(env) { const { rows } = await q(env, "SELECT * FROM admin_users ORDER BY CASE WHEN role='owner' THEN 0 ELSE 1 END, id ASC"); return rows.map(adminUserOut); }
-async function createAdminUser(env, p = {}) { if (!p.email) bad('Email is required'); const password = String(p.password || p.new_password || ''); if (password.length < 12) bad('Password must be at least 12 characters'); const passwordHash = await hashPassword(password); const { rows } = await q(env, `INSERT INTO admin_users(name,email,password_hash,role,is_active) VALUES($1,$2,$3,$4,$5) RETURNING *`, [p.name || p.email.split('@')[0], String(p.email).trim().toLowerCase(), passwordHash, p.role === 'owner' ? 'admin' : (p.role || 'admin'), p.status !== 'inactive' && p.is_active !== false]); await audit(env, 'create_admin', 'admin_users', rows[0].id, `Created admin ${rows[0].email}`); return adminUserOut(rows[0]); }
-async function updateAdminUser(env, id, p = {}) { const existing = (await q(env, 'SELECT * FROM admin_users WHERE id=$1', [id])).rows[0]; if (!existing) bad('Admin user not found', 404); const nextRole = existing.role === 'owner' ? 'owner' : (p.role || existing.role || 'admin'); const { rows } = await q(env, `UPDATE admin_users SET name=$1,email=$2,role=$3,is_active=$4,updated_at=NOW() WHERE id=$5 RETURNING *`, [p.name || existing.name || 'Admin', String(p.email || existing.email).trim().toLowerCase(), nextRole, p.status ? p.status !== 'inactive' : p.is_active !== false, id]); await audit(env, 'update_admin', 'admin_users', id, `Updated admin ${rows[0].email}`); return adminUserOut(rows[0]); }
-async function changeAdminPassword(env, id, p = {}) { const password = p.password || p.new_password; if (!password || String(password).length < 12) bad('Password must be at least 12 characters'); const passwordHash = await hashPassword(password); await q(env, 'UPDATE admin_users SET password_hash=$1, session_version=COALESCE(session_version,0)+1, updated_at=NOW() WHERE id=$2', [passwordHash, id]); await audit(env, 'change_password', 'admin_users', id, 'Password changed'); return { ok: true }; }
-async function deleteAdminUser(env, id) { const row = (await q(env, 'SELECT * FROM admin_users WHERE id=$1', [id])).rows[0]; if (!row) return { ok: true, deleted: 0 }; if (row.role === 'owner') bad('Owner account cannot be deleted', 400); await q(env, 'DELETE FROM admin_users WHERE id=$1', [id]); await audit(env, 'delete_admin', 'admin_users', id, `Deleted admin ${row.email}`); return { ok: true, deleted: 1 }; }
+async function createAdminUser(env, actor, p = {}) { if (!p.email) bad('Email is required'); const password = String(p.password || p.new_password || ''); if (password.length < 12) bad('Password must be at least 12 characters'); const passwordHash = await hashPassword(password); const { rows } = await q(env, `INSERT INTO admin_users(name,email,password_hash,role,is_active) VALUES($1,$2,$3,$4,$5) RETURNING *`, [p.name || p.email.split('@')[0], String(p.email).trim().toLowerCase(), passwordHash, 'admin', p.status !== 'inactive' && p.is_active !== false]); await securityAudit(env, actor, 'create_admin', rows[0].id, `Created admin ${rows[0].email}`); return adminUserOut(rows[0]); }
+async function updateAdminUser(env, actor, id, p = {}) { const existing = (await q(env, 'SELECT * FROM admin_users WHERE id=$1', [id])).rows[0]; if (!existing) bad('Admin user not found', 404, 'ADMIN_NOT_FOUND'); const nextRole = existing.role === 'owner' ? 'owner' : 'admin'; const { rows } = await q(env, `UPDATE admin_users SET name=$1,email=$2,role=$3,is_active=$4,updated_at=NOW() WHERE id=$5 RETURNING *`, [p.name || existing.name || 'Admin', String(p.email || existing.email).trim().toLowerCase(), nextRole, existing.role === 'owner' ? true : (p.status ? p.status !== 'inactive' : p.is_active !== false), id]); await securityAudit(env, actor, 'update_admin', id, `Updated admin ${rows[0].email}`); return adminUserOut(rows[0]); }
+async function changeAdminPassword(env, actor, id, p = {}) { const password = p.password || p.new_password; if (!password || String(password).length < 12) bad('Password must be at least 12 characters'); const target = (await q(env, 'SELECT id,email FROM admin_users WHERE id=$1 LIMIT 1', [id])).rows[0]; if (!target) bad('Admin user not found', 404, 'ADMIN_NOT_FOUND'); const passwordHash = await hashPassword(password); await q(env, 'UPDATE admin_users SET password_hash=$1, session_version=COALESCE(session_version,0)+1, updated_at=NOW() WHERE id=$2', [passwordHash, id]); await q(env, 'UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,NOW()) WHERE lower(admin_email)=lower($1) AND revoked_at IS NULL', [target.email]).catch(() => undefined); await securityAudit(env, actor, 'change_password', id, `Changed password and revoked sessions for ${target.email}`); return { ok: true, sessions_revoked: true }; }
+async function deleteAdminUser(env, actor, id) { const row = (await q(env, 'SELECT * FROM admin_users WHERE id=$1', [id])).rows[0]; if (!row) bad('Admin user not found', 404, 'ADMIN_NOT_FOUND'); if (row.role === 'owner') bad('Owner account cannot be deleted', 400); await q(env, 'DELETE FROM admin_users WHERE id=$1', [id]); await securityAudit(env, actor, 'delete_admin', id, `Deleted admin ${row.email}`); return { ok: true, deleted: 1 }; }
 
 
 async function login(request, env) {
@@ -5034,7 +5034,7 @@ async function login(request, env) {
   const user = rows[0] || null;
   const ok = !!user?.password_hash && await verifyPassword(password, user.password_hash);
   if (!ok || user?.role === 'support_staff') {
-    try { await audit(env, 'login_failed', 'admin_users', email, 'Invalid login attempt'); } catch (_) {}
+    try { await audit(env, 'login_failed', 'admin_users', email, 'Invalid login attempt', { actor_email:email }); } catch (_) {}
     return json({ detail: 'Invalid email or password' }, 401, env);
   }
   if (user.twofa_enabled === true && !await verifyTotp(user.twofa_secret, p.twofa_code || p.otp || p.code)) {
@@ -5045,7 +5045,7 @@ async function login(request, env) {
   }
   const updated = await q(env, 'UPDATE admin_users SET last_login_at=NOW(), updated_at=NOW(), session_version=COALESCE(session_version,0)+1 WHERE id=$1 RETURNING *', [user.id]);
   const nextUser = updated.rows[0] || user;
-  await audit(env, 'login_success', 'admin_users', nextUser.id || nextUser.email, `Admin login ${nextUser.email}`);
+  await audit(env, 'login_success', 'admin_users', nextUser.id || nextUser.email, `Admin login ${nextUser.email}`, { actor_email:nextUser.email });
   const token = await createToken(env, nextUser.email, nextUser.role || 'admin', Number(nextUser.session_version || 0));
   return json({ access_token: token, token_type: 'bearer', user: adminUserOut(nextUser) }, 200, env);
 }
@@ -6401,8 +6401,11 @@ async function requireOwnerStepUp(env, admin, p = {}) {
   }
 }
 async function setupOwn2fa(env, admin) {
+  const current = (await q(env, 'SELECT id,twofa_enabled FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
+  if (!current) bad('Admin not found', 404, 'ADMIN_NOT_FOUND');
+  if (current.twofa_enabled === true) bad('Disable existing 2FA before starting a new setup', 409, 'TWOFA_ALREADY_ENABLED');
   const secret = randomBase32Secret(20);
-  await q(env, 'UPDATE admin_users SET twofa_secret=$1, twofa_enabled=FALSE, updated_at=NOW() WHERE lower(email)=lower($2)', [secret, admin.email]);
+  await q(env, 'UPDATE admin_users SET twofa_secret=$1, updated_at=NOW() WHERE id=$2 AND twofa_enabled=FALSE', [secret, current.id]);
   const issuer = encodeURIComponent(appName(env));
   const account = encodeURIComponent(admin.email);
   await securityAudit(env, admin, '2fa_setup', admin.email, '2FA setup secret generated');
@@ -6428,7 +6431,7 @@ async function changeOwnPassword(env, admin, p = {}) {
   const password = p.password || p.new_password;
   if (!password || String(password).length < 12) bad('Password must be at least 12 characters');
   await q(env, 'UPDATE admin_users SET password_hash=$1, session_version=COALESCE(session_version,0)+1, updated_at=NOW() WHERE lower(email)=lower($2)', [await hashPassword(password), admin.email]);
-  await audit(env, 'change_own_password', 'admin_users', admin.email, 'Own password changed and old sessions revoked');
+  await securityAudit(env, admin, 'change_own_password', admin.email, 'Own password changed and old sessions revoked');
   return { ok: true };
 }
 async function forceLogoutAdmin(env, admin, id) {
@@ -6444,6 +6447,7 @@ async function resetAdmin2fa(env, admin, id, p = {}) {
   const target = (await q(env, 'SELECT id,email,role,twofa_enabled FROM admin_users WHERE id=$1 LIMIT 1', [id])).rows[0];
   if (!target) bad('Admin not found', 404, 'ADMIN_NOT_FOUND');
   if (String(target.email).toLowerCase() === String(admin.email).toLowerCase()) bad('Disable your own 2FA from Account & Security', 400, 'ADMIN_SELF_ACTION_DENIED');
+  if (String(p.confirmation || '').trim().toLowerCase() !== String(target.email).trim().toLowerCase()) bad('Type the target administrator email to confirm the reset', 400, 'ADMIN_CONFIRMATION_REQUIRED');
   await requireOwnerStepUp(env, admin, p);
   await q(env, 'UPDATE admin_users SET twofa_enabled=FALSE, twofa_secret=NULL, session_version=COALESCE(session_version,0)+1, updated_at=NOW() WHERE id=$1', [id]);
   await q(env, 'UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,NOW()) WHERE lower(admin_email)=lower($1) AND revoked_at IS NULL', [target.email]).catch(() => undefined);
@@ -6525,18 +6529,18 @@ async function adminApiDiagnostics(env, scope) {
       checks.push({ name, endpoint, ok: false, status: 'failed', ms: Date.now() - started, error: err?.message || String(err) });
     }
   }
-  function available(name, endpoint, detail) {
-    checks.push({ name, endpoint, ok: true, status: 'available', ms: null, detail });
+  function skipped(name, endpoint, detail) {
+    checks.push({ name, endpoint, ok: true, status: 'skipped', ms: null, detail });
   }
   await verify('Read settings', '/settings', async () => Boolean(await getTheme(env, scope)));
-  available('Update settings route', '/admin/settings', 'Available; no production data was modified');
+  skipped('Update settings route', '/admin/settings', 'Skipped because diagnostics must not modify production data');
   await verify('Read guides', '/admin/guides', async () => (await listAdminGuides(env, scope)).length);
-  available('Delete guide route', '/admin/guides/:id', 'Available; destructive diagnostics are intentionally skipped');
+  skipped('Delete guide route', '/admin/guides/:id', 'Skipped because diagnostics must not delete production data');
   await verify('Read Menu & Images', '/admin/ai-content', async () => (await listAiContent(env, true, scope)).length);
-  available('Delete Menu & Images route', '/admin/ai-content/:id', 'Available; destructive diagnostics are intentionally skipped');
+  skipped('Delete Menu & Images route', '/admin/ai-content/:id', 'Skipped because diagnostics must not delete production data');
   await verify('Read quick replies', '/admin/chat-quick-replies', async () => (await listQuickReplies(env, true, scope)).length);
-  available('Batch quick reply delete route', '/admin/chat-quick-replies/batch-delete', 'Available; destructive diagnostics are intentionally skipped');
-  available('Duplicate cleaner route', '/admin/chat-quick-replies/cleanup-duplicates', 'Available; destructive diagnostics are intentionally skipped');
+  skipped('Batch quick reply delete route', '/admin/chat-quick-replies/batch-delete', 'Skipped because diagnostics must not delete production data');
+  skipped('Duplicate cleaner route', '/admin/chat-quick-replies/cleanup-duplicates', 'Skipped because diagnostics must not modify production data');
   if (env.GUIDE_IMAGES) checks.push({ name: 'Guide image storage', endpoint: '/admin/uploads', ok: true, status: 'configured', ms: null, detail: 'R2 binding is configured; uploads are not written by diagnostics' });
   else checks.push({ name: 'Guide image storage', endpoint: '/admin/uploads', ok: true, status: 'not_enabled', ms: null, detail: 'R2 binding is not configured' });
   return { ok: checks.every(c => c.ok), version: VERSION, checked_at: new Date().toISOString(), checks };

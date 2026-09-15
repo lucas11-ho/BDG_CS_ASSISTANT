@@ -494,15 +494,21 @@ export const api = {
       api.list("audit-logs"),
       api.getSystemHealth(),
     ]);
-    const count = (x: PromiseSettledResult<any>) =>
-      x.status === "fulfilled" && Array.isArray(x.value) ? x.value.length : 0;
+    const unavailableResources: string[] = [];
+    const count = (name: string, result: PromiseSettledResult<unknown>) => {
+      if (result.status === "fulfilled" && Array.isArray(result.value)) return result.value.length;
+      unavailableResources.push(name);
+      return null;
+    };
+    if (audits.status !== "fulfilled" || !Array.isArray(audits.value)) unavailableResources.push("recent activity");
+    if (health.status !== "fulfilled") unavailableResources.push("system health");
     return {
-      totalGuides: count(guides),
-      totalFAQ: count(faqs),
-      totalCategories: count(categories),
-      aiContentItems: count(aiContent),
-      aiPromptSections: count(prompts),
-      chatSessions: count(sessions),
+      totalGuides: count("guides", guides),
+      totalFAQ: count("FAQ", faqs),
+      totalCategories: count("categories", categories),
+      aiContentItems: count("AI content", aiContent),
+      aiPromptSections: count("AI prompts", prompts),
+      chatSessions: count("chat sessions", sessions),
       deepSeekStatus:
         health.status === "fulfilled"
           ? health.value?.checks?.find((x: any) => x.name === "deepseek")?.status || "unknown"
@@ -519,6 +525,7 @@ export const api = {
         health.status === "fulfilled"
           ? health.value
           : { ok: false, status: "unavailable", version: "unknown", checks: [], timestamp: "" },
+      unavailableResources: [...new Set(unavailableResources)],
       recentActivity: (audits.status === "fulfilled" && Array.isArray(audits.value)
         ? audits.value
         : []
@@ -709,11 +716,11 @@ export const api = {
     });
   },
 
-  resetAdmin2FA: async (id: string | number, owner_code = "") => {
+  resetAdmin2FA: async (id: string | number, confirmation: string, owner_code = "") => {
     if (MOCK_MODE) return delay({ ok: true });
     return request(`/admin/admin-users/${id}/reset-2fa`, {
       method: "POST",
-      body: JSON.stringify({ owner_code }),
+      body: JSON.stringify({ confirmation, owner_code }),
     });
   },
 

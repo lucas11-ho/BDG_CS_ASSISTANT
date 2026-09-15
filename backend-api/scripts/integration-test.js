@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { readdir } from 'node:fs/promises';
+import ExcelJS from 'exceljs';
 import pg from 'pg';
 import api, { closeDatabasePools, processNextAiJob, runMigrations } from '../src/core.js';
+import { applyGuideImport, closeBulkContentPools } from '../src/bulk-content-studio.js';
 
 const { Pool } = pg;
 const ADMIN_ORIGIN = 'https://admin.ar-ai666.com'; // Luke shared Admin infrastructure origin; unknown hostnames are reserved for custom-domain guard tests.
@@ -86,11 +88,11 @@ let token = '';
 let platform;
 
 async function call(path, {
-  method = 'GET', body, platformRoute = platform?.public_route_key, auth = true, origin = ADMIN_ORIGIN,
+  method = 'GET', body, platformRoute = platform?.public_route_key, auth = true, authToken = token, origin = ADMIN_ORIGIN,
 } = {}) {
   const headers = new Headers();
   if (origin) headers.set('Origin', origin);
-  if (auth && token) headers.set('Authorization', `Bearer ${token}`);
+  if (auth && authToken) headers.set('Authorization', `Bearer ${authToken}`);
   if (platformRoute) headers.set('X-BDG-Platform-Route', platformRoute);
   if (body !== undefined) headers.set('Content-Type', 'application/json');
   const response = await api.fetch(new Request(`https://api.example.test${path}`, {
@@ -102,6 +104,36 @@ async function call(path, {
   let payload;
   try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
   return { response, payload };
+}
+
+function base32Bytes(secret) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const clean = String(secret || '').toUpperCase().replace(/[^A-Z2-7]/g, '');
+  let bits = '';
+  for (const character of clean) bits += alphabet.indexOf(character).toString(2).padStart(5, '0');
+  const bytes = [];
+  for (let index = 0; index + 8 <= bits.length; index += 8) bytes.push(Number.parseInt(bits.slice(index, index + 8), 2));
+  return new Uint8Array(bytes);
+}
+
+async function currentTotp(secret) {
+  const counter = Math.floor(Date.now() / 30000);
+  const message = new ArrayBuffer(8);
+  new DataView(message).setUint32(4, counter);
+  const key = await crypto.subtle.importKey('raw', base32Bytes(secret), { name:'HMAC', hash:'SHA-1' }, false, ['sign']);
+  const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, message));
+  const offset = signature.at(-1) & 0xf;
+  const binary = ((signature[offset] & 0x7f) << 24) | ((signature[offset + 1] & 0xff) << 16) | ((signature[offset + 2] & 0xff) << 8) | (signature[offset + 3] & 0xff);
+  return String(binary % 1000000).padStart(6, '0');
+}
+
+async function multilingualGuideWorkbook() {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Guide');
+  sheet.addRow(['Guide locale', 'Stable slug', 'Category', 'Title', 'Summary', 'Image', 'Locale status', 'Sort order', 'Recommended buttons', 'SEO title', 'Image alt text']);
+  sheet.addRow(['en-us', 'how-to-withdraw', '', 'How to withdraw', 'English withdrawal guide', '', 'draft', 100, '', 'How to withdraw', 'Withdrawal guide']);
+  sheet.addRow(['hi-in', 'how-to-withdraw', '', 'निकासी कैसे करें', 'हिंदी निकासी गाइड', '', 'draft', 100, '', 'निकासी कैसे करें', 'निकासी गाइड']);
+  return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
 function expectStatus(result, status, label) {
@@ -208,6 +240,69 @@ try {
   await database.query(`INSERT INTO platform_locales(tenant_id,platform_id,locale,display_name,native_name,direction,is_default,is_enabled)
     VALUES($1,$2,'id','Indonesian','Bahasa Indonesia','ltr',FALSE,TRUE)
     ON CONFLICT(tenant_id,platform_id,locale) DO UPDATE SET is_enabled=TRUE`, [platform.tenant_id,platform.id]);
+
+  const secondaryEmail = 'security-admin@example.test';
+  const secondaryPassword = 'Security-Admin-Password-2026!';
+  const createdAdmin = expectStatus(await call('/admin/admin-users', {
+    method:'POST', platformRoute:'', body:{ name:'Security Admin', email:secondaryEmail, password:secondaryPassword, role:'owner' },
+  }), 200, 'Create a protected secondary administrator');
+  assert.equal(createdAdmin.role, 'admin', 'Only the configured account may retain the global owner role');
+
+  const secondaryLogin = expectStatus(await call('/auth/login', {
+    method:'POST', auth:false, platformRoute:'', body:{ email:secondaryEmail, password:secondaryPassword },
+  }), 200, 'Log in as the secondary administrator');
+  const secondaryToken = secondaryLogin.access_token;
+  assert.ok(secondaryToken);
+  expectStatus(await call('/admin/me', { platformRoute:'', authToken:secondaryToken }), 200, 'Secondary token works before revocation');
+  expectStatus(await call(`/admin/admin-users/${createdAdmin.id}/force-logout`, {
+    method:'POST', platformRoute:'', body:{},
+  }), 200, 'Owner force logout revokes the target account');
+  expectStatus(await call('/admin/me', { platformRoute:'', authToken:secondaryToken }), 401, 'Revoked secondary token is rejected');
+
+  const ownerSecret = 'JBSWY3DPEHPK3PXP';
+  const targetSecret = 'KRUGS4ZANFZSAYJA';
+  await database.query('UPDATE admin_users SET twofa_enabled=TRUE,twofa_secret=$1 WHERE lower(email)=lower($2)', [ownerSecret, env.ADMIN_EMAIL]);
+  await database.query('UPDATE admin_users SET twofa_enabled=TRUE,twofa_secret=$1 WHERE id=$2', [targetSecret, createdAdmin.id]);
+  const setupWhileEnabled = expectStatus(await call('/admin/me/2fa/setup', { method:'POST', platformRoute:'', body:{} }), 409, 'Enabled 2FA cannot be silently replaced');
+  assert.equal(setupWhileEnabled.code, 'TWOFA_ALREADY_ENABLED');
+  const missingConfirmation = expectStatus(await call(`/admin/admin-users/${createdAdmin.id}/reset-2fa`, {
+    method:'POST', platformRoute:'', body:{ owner_code:await currentTotp(ownerSecret) },
+  }), 400, 'Reset 2FA requires typed target confirmation');
+  assert.equal(missingConfirmation.code, 'ADMIN_CONFIRMATION_REQUIRED');
+  const missingStepUp = expectStatus(await call(`/admin/admin-users/${createdAdmin.id}/reset-2fa`, {
+    method:'POST', platformRoute:'', body:{ confirmation:secondaryEmail },
+  }), 403, 'Reset 2FA requires owner step-up verification');
+  assert.equal(missingStepUp.code, 'OWNER_2FA_REQUIRED');
+  expectStatus(await call(`/admin/admin-users/${createdAdmin.id}/reset-2fa`, {
+    method:'POST', platformRoute:'', body:{ confirmation:secondaryEmail, owner_code:await currentTotp(ownerSecret) },
+  }), 200, 'Owner reset 2FA clears protection and revokes target sessions');
+  const resetTarget = (await database.query('SELECT twofa_enabled,twofa_secret FROM admin_users WHERE id=$1', [createdAdmin.id])).rows[0];
+  assert.equal(resetTarget.twofa_enabled, false);
+  assert.equal(resetTarget.twofa_secret, null);
+  const ownerAudit = expectStatus(await call('/admin/audit-logs'), 200, 'Owner reads scoped and owner-security audit events');
+  assert.ok(ownerAudit.some((entry) => entry.action === 'reset_2fa' && entry.actor_email === env.ADMIN_EMAIL));
+
+  await database.query(`INSERT INTO platform_locales(tenant_id,platform_id,locale,display_name,native_name,direction,is_default,is_enabled,sort_order)
+    VALUES
+      ($1,$2,'en-us','English (US)','English (US)','ltr',FALSE,TRUE,20),
+      ($1,$2,'hi-in','Hindi (India)','हिन्दी','ltr',FALSE,TRUE,30)
+    ON CONFLICT(tenant_id,platform_id,locale) DO UPDATE SET is_enabled=TRUE`, [platform.tenant_id,platform.id]);
+  const workbook = await multilingualGuideWorkbook();
+  const importForm = new FormData();
+  importForm.append('file', new Blob([workbook], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'Guide_Multilingual.xlsx');
+  const importResult = await applyGuideImport(new Request('https://api.example.test/admin/content-bulk/guide/import', { method:'POST', body:importForm }), env, platform, { statusMode:'draft' });
+  assert.equal(importResult.created, 2);
+  assert.equal(Number((await database.query("SELECT COUNT(*)::int AS count FROM guides WHERE platform_id=$1 AND slug='how-to-withdraw' AND deleted_at IS NULL", [platform.id])).rows[0].count), 1);
+  const importedGuide = (await database.query("SELECT id FROM guides WHERE platform_id=$1 AND slug='how-to-withdraw' AND deleted_at IS NULL", [platform.id])).rows[0];
+  assert.equal(Number((await database.query('SELECT COUNT(*)::int AS count FROM guide_translations WHERE platform_id=$1 AND guide_id=$2', [platform.id, importedGuide.id])).rows[0].count), 2);
+  await database.query("UPDATE guide_translations SET body='preserved body',rich_html='<p>preserved body</p>' WHERE guide_id=$1 AND locale='en-us'", [importedGuide.id]);
+  const secondImportForm = new FormData();
+  secondImportForm.append('file', new Blob([workbook], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'Guide_Multilingual.xlsx');
+  const secondImport = await applyGuideImport(new Request('https://api.example.test/admin/content-bulk/guide/import', { method:'POST', body:secondImportForm }), env, platform, { statusMode:'draft' });
+  assert.equal(secondImport.updated, 2);
+  const preservedTranslation = (await database.query("SELECT body,rich_html FROM guide_translations WHERE guide_id=$1 AND locale='en-us'", [importedGuide.id])).rows[0];
+  assert.equal(preservedTranslation.body, 'preserved body');
+  assert.equal(preservedTranslation.rich_html, '<p>preserved body</p>');
 
   const runtimeRole = expectStatus(await call('/admin/ai/prompts', {
     method:'POST', body:{ section_key:'integration_runtime_role', title:'Integration Runtime Role', content:'INTEGRATION_ROLE_MARKER: You are the versioned integration assistant.', enabled:true, priority:5 },
@@ -357,6 +452,8 @@ try {
 
   console.log(`PASS ${migrationFiles.length} immutable SQL migration files applied and rechecked`);
   console.log('PASS Real login, scoped CRUD, shared-host public read, hostname guard, and tenant-isolation paths');
+  console.log('PASS Owner 2FA step-up, typed reset confirmation, force logout, session revocation, and security audit paths');
+  console.log('PASS Multilingual Guide import creates one stable parent, preserves two locales, and keeps rich body content on re-import');
   console.log('PASS Rich HTML is sanitized in the API response and PostgreSQL row');
   console.log('PASS Private connector targets are rejected through the authenticated API');
   console.log('PASS Asynchronous HTTP 202 chat acknowledgement, durable worker completion, plain-text answers, approved images, and provider retry exhaustion paths');
@@ -365,5 +462,6 @@ try {
 } finally {
   globalThis.fetch = originalFetch;
   if (database) await database.end();
+  await closeBulkContentPools();
   await closeDatabasePools();
 }

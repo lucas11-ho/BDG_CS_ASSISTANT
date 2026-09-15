@@ -266,13 +266,14 @@ export default function AdminLayout({
   const crumbTitle = title ?? current?.label ?? "Dashboard";
 
   const userMenu: MenuProps["items"] = [
-    {
-      key: "profile",
-      icon: <UserOutlined />,
-      label: tr("Account & Security"),
-      onClick: () => setSecurityOpen(true),
-    },
-    { type: "divider" },
+    ...(user?.role === "owner"
+      ? [{
+          key: "profile",
+          icon: <UserOutlined />,
+          label: tr("Account & Security"),
+          onClick: () => setSecurityOpen(true),
+        }, { type: "divider" as const }]
+      : []),
     {
       key: "logout",
       icon: <LogoutOutlined />,
@@ -388,7 +389,9 @@ export default function AdminLayout({
           </Content>
         </Layout>
       </Layout>
-      <AccountSecurityDrawer open={securityOpen} onClose={() => setSecurityOpen(false)} />
+      {user?.role === "owner" ? (
+        <AccountSecurityDrawer open={securityOpen} onClose={() => setSecurityOpen(false)} />
+      ) : null}
     </ConfigProvider>
   );
 }

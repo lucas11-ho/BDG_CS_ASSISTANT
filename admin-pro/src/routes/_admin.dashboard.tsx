@@ -61,8 +61,12 @@ function DashboardPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.getDashboardStats().then(setData).catch((reason: any) => setError(reason?.message || t("Failed to load dashboard")));
-  }, []);
+    let active = true;
+    api.getDashboardStats()
+      .then((result) => { if (active) setData(result); })
+      .catch((reason: any) => { if (active) setError(reason?.message || t("Failed to load dashboard")); });
+    return () => { active = false; };
+  }, [t]);
 
   const checks = useMemo(
     () => new Map((data?.systemHealth?.checks || []).map((check: any) => [check.name, check])),
@@ -97,10 +101,19 @@ function DashboardPage() {
 
   return (
     <>
+      {data.unavailableResources?.length ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={t("Some dashboard data is unavailable")}
+          description={`${t("Unavailable")}: ${data.unavailableResources.map((resource: string) => t(resource)).join(", ")}`}
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
       <Row gutter={[12, 12]}>
         {stats.map((item) => (
           <Col xs={24} sm={12} md={8} lg={6} key={String(item.title)}>
-            <StatCard {...item} />
+            <StatCard {...item} value={item.value ?? "—"} />
           </Col>
         ))}
       </Row>

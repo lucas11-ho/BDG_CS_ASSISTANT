@@ -33,15 +33,21 @@ for (const marker of [
 assert.ok(core.includes("requireOwnerStepUp"));
 assert.ok(core.includes("OWNER_2FA_REQUIRED"));
 assert.ok(core.includes("ADMIN_SELF_ACTION_DENIED"));
+assert.ok(core.includes("ADMIN_CONFIRMATION_REQUIRED"));
+assert.ok(core.includes("TWOFA_ALREADY_ENABLED"));
 assert.ok(core.includes("session_version=COALESCE(session_version,0)+1"));
 assert.ok(core.includes("securityAudit(env, admin, 'force_logout'"));
 assert.ok(core.includes("securityAudit(env, admin, 'reset_2fa'"));
 assert.ok(core.includes("scope.actor_email = admin?.email"));
 assert.ok(core.includes("scope?.actor_email || 'admin'"));
+assert.ok(core.includes("tenant_id IS NULL AND platform_id IS NULL"));
 
-assert.ok(bulk.includes("guideIdsBySlug"));
-assert.ok(bulk.includes("row.existing_guide_id || guideIdsBySlug.get(row.slug)"));
-assert.ok(bulk.includes("guideIdsBySlug.set(row.slug, guideId)"));
+assert.ok(bulk.includes("ON CONFLICT (platform_id,slug) WHERE deleted_at IS NULL"));
+assert.ok(bulk.includes("DO UPDATE SET category_id=EXCLUDED.category_id"));
+assert.ok(bulk.includes("GUIDE_PARENT_UPSERT_FAILED"));
+assert.ok(bulk.includes("ON CONFLICT (platform_id,guide_id,locale)"));
+assert.ok(bulk.includes("DO UPDATE SET title=EXCLUDED.title"));
+assert.ok(bulk.includes("GUIDE_IMPORT_CONFLICT"));
 assert.ok(server.includes("error?.code === '23505'"));
 assert.ok(server.includes("CONTENT_CONFLICT"));
 
@@ -63,6 +69,8 @@ assert.ok(securityDrawer.includes("api.disable2FA(code)"));
 assert.ok(adminUsers.includes("api.forceLogoutAdmin"));
 assert.ok(adminUsers.includes("api.resetAdmin2FA"));
 assert.ok(adminUsers.includes("Owner 2FA code"));
+assert.ok(adminUsers.includes("Type the administrator email to confirm"));
+assert.ok(adminUsers.includes("values.confirmation"));
 assert.ok(!adminUsers.includes('dataIndex: "session_version"'));
 
 for (const fakeMetric of ['99.98%', '812 ms', '0.04%', '12 jobs', 'value: "Operational"']) {
@@ -72,6 +80,8 @@ assert.ok(dashboard.includes("data.systemHealth"));
 assert.ok(dashboard.includes("activity.actor"));
 assert.ok(diagnostics.includes('row.status || (row.ok ? "verified" : "failed")'));
 assert.ok(!core.includes("async () => 'ready'"));
+assert.ok(core.includes("status: 'skipped'"));
+assert.ok(!core.includes("status: 'available'"));
 
 assert.ok(dataPage.includes("readOnly?: boolean"));
 assert.ok(dataPage.includes("onExport?:"));
@@ -80,7 +90,7 @@ assert.ok(dataPage.includes("rowSelection={allowSelect"));
 assert.ok(auditLogs.includes("readOnly"));
 assert.ok(auditLogs.includes("showStatusFilter={false}"));
 
-for (const phrase of ["Account & Security", "Owner 2FA code", "Overall status", "Contact the owner to reset access"]) {
+for (const phrase of ["Account & Security", "Owner 2FA code", "Type the administrator email to confirm", "Overall status", "Contact the owner to reset access"]) {
   assert.ok(messages.includes('["' + phrase + '"'), "missing i18n phrase " + phrase);
 }
 

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, message } from "antd";
 import {
   DeleteOutlined,
@@ -42,7 +42,7 @@ function AdminUsersPage() {
   const platformContext = Boolean(getActiveAdminPlatformRoute());
   const currentUser = getCurrentUser();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       setRows((await api.list("admin-users")) as AdminUser[]);
@@ -51,11 +51,11 @@ function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [t]);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   const create = () => {
     setEditing(null);
@@ -120,7 +120,8 @@ function AdminUsersPage() {
   const reset2FA = async () => {
     try {
       const values = await resetForm.validateFields();
-      await api.resetAdmin2FA(resetUser!.id, values.owner_code || "");
+      if (!resetUser) return;
+      await api.resetAdmin2FA(resetUser.id, values.confirmation, values.owner_code || "");
       message.success(t("2FA was reset and all sessions were revoked"));
       setResetOpen(false);
       await load();
@@ -255,7 +256,10 @@ function AdminUsersPage() {
           <Form.Item name="role" label={t("Role")}>
             <Select options={platformContext
               ? ["platform_admin", "content_manager", "ai_manager", "support_analyst", "viewer"].map((value) => ({ value, label: value.replaceAll("_", " ") }))
-              : [{ value: "admin", label: t("Admin") }, { value: "owner", label: t("Owner (protected)") }]}
+              : editing?.role === "owner"
+                ? [{ value: "owner", label: t("Owner (protected)") }]
+                : [{ value: "admin", label: t("Admin") }]}
+              disabled={!platformContext && editing?.role === "owner"}
             />
           </Form.Item>
           <Form.Item name="status" label={t("Status")}>
@@ -302,8 +306,32 @@ function AdminUsersPage() {
           style={{ marginBottom: 16 }}
         />
         <Form layout="vertical" form={resetForm}>
-          <Form.Item name="owner_code" label={t("Owner 2FA code")}>
-            <Input inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="123456" />
+          <Form.Item
+            name="confirmation"
+            label={t("Type the administrator email to confirm")}
+            rules={[
+              { required: true, message: t("Type the target administrator email") },
+              {
+                validator: (_, value) =>
+                  String(value || "").trim().toLowerCase() === String(resetUser?.email || "").trim().toLowerCase()
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(t("Email confirmation does not match"))),
+              },
+            ]}
+          >
+            <Input autoComplete="off" placeholder={resetUser?.email} />
+          </Form.Item>
+          <Form.Item
+            name="owner_code"
+            label={t("Owner 2FA code (required if enabled)")}
+          >
+            <Input
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="123456"
+              onChange={(event) => resetForm.setFieldValue("owner_code", event.target.value.replace(/\D/g, "").slice(0, 6))}
+            />
           </Form.Item>
         </Form>
       </Drawer>
