@@ -33,6 +33,7 @@ import {
 } from "@ant-design/icons";
 import RichKnowledgeEditor from "@/components/RichKnowledgeEditor";
 import LocalizedHelp from "@/components/LocalizedHelp";
+import GuideCoverStudio from "@/components/GuideCoverStudio";
 import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/_admin/guide-images")({ component: VisualGuideStudio });
@@ -128,12 +129,18 @@ function VisualGuideStudio() {
   const [editorJson, setEditorJson] = useState(EMPTY_DOC);
   const [editorHtml, setEditorHtml] = useState("");
   const [form] = Form.useForm();
+  const selectedCategoryId = Form.useWatch("category_id", form);
 
   const defaultLocale = useMemo(
     () => locales.find((locale) => locale.is_default)?.code || locales[0]?.code || "en",
     [locales],
   );
   const activeDocument = translations[activeLocale] || emptyTranslation({ code: activeLocale || defaultLocale });
+  const activeLocaleMeta = locales.find((locale) => locale.code === activeLocale) || { code: activeLocale || defaultLocale };
+  const selectedCategoryName = useMemo(
+    () => categories.find((category) => Number(category.id) === Number(selectedCategoryId))?.name || editing?.category_name || "Guide",
+    [categories, selectedCategoryId, editing?.category_name],
+  );
   const canUploadGuides = access?.can_upload_guides === true;
   const canPublishGuides = access?.can_publish_guides === true;
 
@@ -402,16 +409,30 @@ function VisualGuideStudio() {
           <Col xs={24} md={8}><Form.Item name="category_id" label="Category"><Select allowClear options={categories.map((category) => ({ value: category.id, label: category.name }))} /></Form.Item></Col>
         </Row>
         <Row gutter={12}>
-          <Col xs={24} md={12}><Form.Item name="title" label={`${localeName(locales.find((locale) => locale.code === activeLocale) || { code: activeLocale })} title`} rules={[{ required: true }]}><Input onChange={(event) => updateActiveDocument({ title: event.target.value })} /></Form.Item></Col>
+          <Col xs={24} md={12}><Form.Item name="title" label={`${localeName(activeLocaleMeta)} title`} rules={[{ required: true }]}><Input onChange={(event) => updateActiveDocument({ title: event.target.value })} /></Form.Item></Col>
           <Col xs={24} md={12}><Form.Item name="summary" label="Summary"><Input onChange={(event) => updateActiveDocument({ summary: event.target.value })} /></Form.Item></Col>
         </Row>
         <RichKnowledgeEditor value={editorJson} onChange={(json, html) => { setEditorJson(json); setEditorHtml(html); updateActiveDocument({ rich_json: json, rich_html: html, body: plainText(html) }); }} uploadImage={uploadImage} />
         <Row gutter={12} style={{ marginTop: 14 }}>
           <Col xs={24} md={12}><Form.Item name="keywords" label="Search keywords"><Input placeholder="deposit, pending, recharge" onChange={(event) => updateActiveDocument({ keywords: event.target.value })} /></Form.Item></Col>
         </Row>
-        <Divider titlePlacement="start">Motion media cover</Divider>
+        <Divider titlePlacement="start">Professional cover studio</Divider>
+        <GuideCoverStudio
+          locale={activeLocale}
+          direction={activeLocaleMeta.direction}
+          title={activeDocument.title || ""}
+          summary={activeDocument.summary || ""}
+          category={selectedCategoryName}
+          currentCoverUrl={activeDocument.cover_image_url || ""}
+          canUpload={canUploadGuides}
+          onGenerated={(url) => {
+            updateActiveDocument({ cover_media_type: "image", cover_image_url: url, cover_video_url: "", cover_video_poster_url: "" });
+            form.setFieldsValue({ cover_media_type: "image", cover_image_url: url, cover_video_url: "", cover_video_poster_url: "" });
+          }}
+        />
+        <Divider titlePlacement="start">Motion media cover / custom override</Divider>
         <Card size="small" style={{ marginBottom: 16 }}>
-          <Alert showIcon type="info" style={{ marginBottom: 14 }} message="Image, animated GIF, or video cover" description="GIF covers play naturally. Video accepts MP4 or WebM. When Autoplay is enabled, Muted is locked on to satisfy browser autoplay rules." />
+          <Alert showIcon type="info" style={{ marginBottom: 14 }} message="Image, animated GIF, or video cover" description="Use this section when you want a fully custom cover instead of the generated professional cover. GIF covers play naturally. Video accepts MP4 or WebM. When Autoplay is enabled, Muted is locked on to satisfy browser autoplay rules." />
           <Row gutter={12}>
             <Col xs={24} md={8}><Form.Item name="cover_media_type" label="Cover media type"><Select options={[{ value: "image", label: "Image" }, { value: "gif", label: "Animated GIF" }, { value: "video", label: "Video" }]} onChange={(value) => updateActiveDocument({ cover_media_type: value })} /></Form.Item></Col>
             {activeDocument.cover_media_type === "video" ? <>
