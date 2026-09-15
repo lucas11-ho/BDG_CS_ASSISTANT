@@ -81,6 +81,7 @@ jobs:
           npm run test:v1184-bulk-content
           npm run test:v1191-admin-trust
           npm run test:v1202-admin-security
+          npm run test:v1210-localized-analytics
           npm run test:chat-reliability
           npm run test:security
           npm run test:structured
