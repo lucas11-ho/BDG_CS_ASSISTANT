@@ -1,1 +1,0 @@
-v1.21.1 hotfix scope: authenticated localized-category and traffic-analytics Admin routes must not intercept browser CORS OPTIONS preflight. OPTIONS requests fall through to the existing API CORS handler; real GET/POST/PUT/DELETE requests remain authenticated and permission-checked.
