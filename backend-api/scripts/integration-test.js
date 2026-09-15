@@ -288,9 +288,10 @@ try {
       ($1,$2,'hi-in','Hindi (India)','हिन्दी','ltr',FALSE,TRUE,30)
     ON CONFLICT(tenant_id,platform_id,locale) DO UPDATE SET is_enabled=TRUE`, [platform.tenant_id,platform.id]);
   const workbook = await multilingualGuideWorkbook();
+  const platformScope = { tenant_id:Number(platform.tenant_id), platform_id:Number(platform.id) };
   const importForm = new FormData();
   importForm.append('file', new Blob([workbook], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'Guide_Multilingual.xlsx');
-  const importResult = await applyGuideImport(new Request('https://api.example.test/admin/content-bulk/guide/import', { method:'POST', body:importForm }), env, platform, { statusMode:'draft' });
+  const importResult = await applyGuideImport(new Request('https://api.example.test/admin/content-bulk/guide/import', { method:'POST', body:importForm }), env, platformScope, { statusMode:'draft' });
   assert.equal(importResult.created, 2);
   assert.equal(Number((await database.query("SELECT COUNT(*)::int AS count FROM guides WHERE platform_id=$1 AND slug='how-to-withdraw' AND deleted_at IS NULL", [platform.id])).rows[0].count), 1);
   const importedGuide = (await database.query("SELECT id FROM guides WHERE platform_id=$1 AND slug='how-to-withdraw' AND deleted_at IS NULL", [platform.id])).rows[0];
@@ -298,7 +299,7 @@ try {
   await database.query("UPDATE guide_translations SET body='preserved body',rich_html='<p>preserved body</p>' WHERE guide_id=$1 AND locale='en-us'", [importedGuide.id]);
   const secondImportForm = new FormData();
   secondImportForm.append('file', new Blob([workbook], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'Guide_Multilingual.xlsx');
-  const secondImport = await applyGuideImport(new Request('https://api.example.test/admin/content-bulk/guide/import', { method:'POST', body:secondImportForm }), env, platform, { statusMode:'draft' });
+  const secondImport = await applyGuideImport(new Request('https://api.example.test/admin/content-bulk/guide/import', { method:'POST', body:secondImportForm }), env, platformScope, { statusMode:'draft' });
   assert.equal(secondImport.updated, 2);
   const preservedTranslation = (await database.query("SELECT body,rich_html FROM guide_translations WHERE guide_id=$1 AND locale='en-us'", [importedGuide.id])).rows[0];
   assert.equal(preservedTranslation.body, 'preserved body');
