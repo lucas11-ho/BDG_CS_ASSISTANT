@@ -38,7 +38,20 @@ const { Pool } = pg;
 const scryptAsync = promisify(scryptCallback);
 const pools = new Map();
 
-const VERSION = '1.19.1-admin-trust-security';
+const VERSION = '1.20.2-admin-2fa-permissions';
+
+const ADMIN_PERMISSION_CATALOG = Object.freeze([
+  'dashboard.view',
+  'platform.view', 'platform.manage',
+  'content.view', 'content.manage',
+  'ai.view', 'ai.manage',
+  'support.view', 'support.manage',
+  'chat.view', 'chat.manage',
+  'appearance.view', 'appearance.manage',
+  'audit.view',
+  'system.view',
+]);
+const ADMIN_PERMISSION_SET = new Set(ADMIN_PERMISSION_CATALOG);
 const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
 const PBKDF2_ITERATIONS = 60000; // Compatibility cap only; new admin passwords use Worker-safe salted SHA-256.
 const DEFAULT_SUPPORT = 'https://t.me/your_support_bot';
@@ -178,6 +191,15 @@ async function route(request, env, url) {
   if (method === 'GET' && path === '/admin/sessions') return json(await listAdminSessions(env, admin), 200, env);
   if (method === 'GET' && path === '/admin/platform-context') return json(await getAdminPlatformContext(env, request, admin), 200, env);
 
+  // An owner-required 2FA policy creates a deliberately limited session: the
+  // administrator can reach only the self-service security routes above until
+  // an authenticator has been enrolled. Every other permission is checked by
+  // the backend; hiding a link in the Admin UI is never the security boundary.
+  if (path.startsWith('/admin/')) {
+    requireCompletedAdmin2fa(admin);
+    requireAdminRoutePermission(admin, method, path);
+  }
+
   // v1.0 SaaS tenant core. These endpoints are intentionally separate from the
   // old `support_platforms` table, which only controls ticket-routing behavior.
   if (method === 'GET' && path === '/admin/tenant-control-center') return json(await getTenantControlCenter(env, admin), 200, env);
@@ -215,7 +237,7 @@ async function route(request, env, url) {
   // their generated /p/<route-key>/admin URL.
   const scope = requiresPlatformScope(path) ? await resolveAdminPlatformScope(env, request, admin) : null;
   if (scope) scope.actor_email = admin?.email || '';
-  if (scope && method !== 'GET') requirePlatformWrite(scope);
+  if (scope) requirePlatformRoutePermission(scope, method, path);
 
   if (path.startsWith('/admin/support')) {
     const supportResponse = await handleSupportAdminRoute({ request, env, url, path, method, scope, admin, deps:supportDependencies() });
@@ -722,7 +744,7 @@ async function ensureBootstrap(env) {
 }
 async function createTables(env) {
   const statements = [
-    `CREATE TABLE IF NOT EXISTS admin_users (id SERIAL PRIMARY KEY,name VARCHAR(160) DEFAULT 'Owner',email VARCHAR(255) UNIQUE NOT NULL,password_hash VARCHAR(255),role VARCHAR(50) DEFAULT 'owner',is_active BOOLEAN DEFAULT TRUE,last_login_at TIMESTAMPTZ,twofa_enabled BOOLEAN DEFAULT FALSE,twofa_secret TEXT,session_version INTEGER DEFAULT 0,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS admin_users (id SERIAL PRIMARY KEY,name VARCHAR(160) DEFAULT 'Owner',email VARCHAR(255) UNIQUE NOT NULL,password_hash VARCHAR(255),role VARCHAR(50) DEFAULT 'owner',is_active BOOLEAN DEFAULT TRUE,last_login_at TIMESTAMPTZ,twofa_enabled BOOLEAN DEFAULT FALSE,twofa_secret TEXT,twofa_required BOOLEAN NOT NULL DEFAULT FALSE,twofa_last_counter BIGINT,twofa_failed_attempts INTEGER NOT NULL DEFAULT 0,twofa_locked_until TIMESTAMPTZ,permissions_json TEXT,session_version INTEGER DEFAULT 0,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS categories (id SERIAL PRIMARY KEY,name VARCHAR(120) UNIQUE NOT NULL,slug VARCHAR(150) UNIQUE NOT NULL,description TEXT,icon VARCHAR(20) DEFAULT 'target',icon_url TEXT,sort_order INTEGER DEFAULT 100,created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS guides (id SERIAL PRIMARY KEY,title VARCHAR(180) NOT NULL,slug VARCHAR(220) UNIQUE NOT NULL,summary TEXT,body TEXT NOT NULL,image_urls TEXT,keywords TEXT,language VARCHAR(20) DEFAULT 'en',priority INTEGER DEFAULT 100,status VARCHAR(30) DEFAULT 'published',category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS faqs (id SERIAL PRIMARY KEY,question VARCHAR(255) NOT NULL,answer TEXT NOT NULL,answer_html TEXT DEFAULT '',answer_json TEXT DEFAULT '',image_urls TEXT DEFAULT '',locale VARCHAR(20) DEFAULT 'en',keywords TEXT,priority INTEGER DEFAULT 100,status VARCHAR(30) DEFAULT 'published',created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`,
@@ -792,6 +814,11 @@ async function createTables(env) {
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`);
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_enabled BOOLEAN DEFAULT FALSE`);
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_secret TEXT`);
+  await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_required BOOLEAN NOT NULL DEFAULT FALSE`);
+  await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_last_counter BIGINT`);
+  await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_failed_attempts INTEGER NOT NULL DEFAULT 0`);
+  await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_locked_until TIMESTAMPTZ`);
+  await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS permissions_json TEXT`);
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS session_version INTEGER DEFAULT 0`);
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
@@ -2286,7 +2313,7 @@ async function resolveAdminPlatformScope(env, request, admin) {
   const requested = resolution.reference || resolution.raw_reference || '';
   if (!requested) bad('Open the platform-specific Admin URL to manage this platform', 403, 'PLATFORM_CONTEXT_REQUIRED');
   const scope = await resolvePublicPlatformScope(env, requested, resolution);
-  if (isPlatformOperator(admin)) return { ...scope, access_role:'operator', can_write:true, can_manage_platform:true, can_upload_guides:true, can_publish_guides:true, operator:true };
+  if (isPlatformOperator(admin)) return { ...scope, access_role:'operator', permissions:[...ADMIN_PERMISSION_CATALOG], can_write:true, can_manage_platform:true, can_upload_guides:true, can_publish_guides:true, operator:true };
   const tenantMembership = (await q(env, `SELECT tm.role AS membership_role FROM saas_tenant_memberships tm
     JOIN admin_users u ON u.id=tm.admin_user_id
     WHERE tm.tenant_id=$1 AND lower(u.email)=lower($2) LIMIT 1`, [scope.tenant_id, admin.email])).rows[0];
@@ -2296,14 +2323,37 @@ async function resolveAdminPlatformScope(env, request, admin) {
   const tenantRole = String(tenantMembership?.membership_role || '');
   const platformRole = String(platformMembership?.membership_role || '');
   if (!tenantRole && !platformRole) bad('You do not have access to this client platform', 403, 'PLATFORM_ACCESS_DENIED');
-  const canManagePlatform = ['tenant_owner','tenant_admin'].includes(tenantRole) || ['platform_owner','platform_admin'].includes(platformRole);
-  const canWrite = canManagePlatform || ['content_manager','ai_manager'].includes(platformRole);
-  const canUploadGuides = canManagePlatform;
-  return { ...scope, tenant_role:tenantRole, platform_role:platformRole, access_role:tenantRole || platformRole || 'viewer', can_write:canWrite, can_manage_platform:canManagePlatform, can_upload_guides:canUploadGuides, can_publish_guides:canManagePlatform, operator:false };
+  const accessRole = ['tenant_owner','tenant_admin'].includes(tenantRole) ? tenantRole : (platformRole || tenantRole || 'viewer');
+  const rolePermissions = [...new Set([
+    ...permissionsForMembershipRole(tenantRole),
+    ...permissionsForMembershipRole(platformRole),
+  ])];
+  const explicitPermissions = admin.permissions == null ? null : new Set(admin.permissions);
+  const permissions = explicitPermissions == null
+    ? rolePermissions
+    : rolePermissions.filter(permission => explicitPermissions.has(permission));
+  const canManagePlatform = permissions.includes('platform.manage');
+  const canWrite = permissions.some(permission => permission.endsWith('.manage'));
+  const canUploadGuides = permissions.includes('content.manage');
+  return { ...scope, tenant_role:tenantRole, platform_role:platformRole, access_role:accessRole, permissions, can_write:canWrite, can_manage_platform:canManagePlatform, can_upload_guides:canUploadGuides, can_publish_guides:canUploadGuides, operator:false };
 }
 async function getAdminPlatformContext(env, request, admin) {
   const scope = await resolveAdminPlatformScope(env, request, admin);
-  return { ok:true, version:VERSION, platform:scope, platform_resolution:platformResolutionDiagnostics(scope, scope.platform_context), access: { role:scope.access_role, can_write:scope.can_write, can_manage_platform:scope.can_manage_platform, can_upload_guides:scope.can_upload_guides, can_publish_guides:scope.can_publish_guides } };
+  return { ok:true, version:VERSION, platform:scope, platform_resolution:platformResolutionDiagnostics(scope, scope.platform_context), access: { role:scope.access_role, permissions:scope.permissions, can_write:scope.can_write, can_manage_platform:scope.can_manage_platform, can_upload_guides:scope.can_upload_guides, can_publish_guides:scope.can_publish_guides } };
+}
+function permissionsForMembershipRole(role) {
+  if (['tenant_owner','tenant_admin','platform_owner','platform_admin'].includes(role)) return [...ADMIN_PERMISSION_CATALOG];
+  if (role === 'content_manager') return ['dashboard.view','content.view','content.manage','appearance.view'];
+  if (role === 'ai_manager') return ['dashboard.view','content.view','ai.view','ai.manage','system.view'];
+  if (role === 'support_analyst') return ['dashboard.view','support.view','chat.view','audit.view'];
+  if (role === 'viewer') return ['dashboard.view','platform.view','content.view','ai.view','support.view','chat.view','appearance.view','audit.view','system.view'];
+  return [];
+}
+function requirePlatformRoutePermission(scope, method, path) {
+  if (scope?.operator) return;
+  const required = adminPermissionForRoute(method, path);
+  if (!required || required === 'owner') return;
+  if (!scope?.permissions?.includes(required)) bad(`Platform permission required: ${required}`, 403, 'PLATFORM_PERMISSION_DENIED');
 }
 function requirePlatformWrite(scope) {
   if (!scope?.can_write) bad('This platform membership is read-only', 403, 'PLATFORM_WRITE_DENIED');
@@ -4949,7 +4999,75 @@ async function readJson(request) {
 }
 
 
-function adminUserOut(row) { return { id: row.id, name: row.name || row.email?.split('@')[0] || 'Admin', email: row.email, role: row.role || 'admin', status: row.is_active === false ? 'inactive' : 'active', is_active: row.is_active !== false, twofa_enabled: row.twofa_enabled === true, session_version: Number(row.session_version || 0), lastLogin: row.last_login_at ? String(row.last_login_at) : '', created_at: row.created_at ? String(row.created_at) : '', updated_at: row.updated_at ? String(row.updated_at) : '' }; }
+function parseAdminPermissions(value) {
+  if (value == null || value === '') return null;
+  try {
+    const parsed = Array.isArray(value) ? value : JSON.parse(String(value));
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.map(String).filter(permission => ADMIN_PERMISSION_SET.has(permission)))].sort();
+  } catch { return []; }
+}
+function validatedAdminPermissions(value) {
+  if (value == null) return null;
+  if (!Array.isArray(value)) bad('permissions must be an array', 400, 'ADMIN_PERMISSIONS_INVALID');
+  const invalid = value.map(String).filter(permission => !ADMIN_PERMISSION_SET.has(permission));
+  if (invalid.length) bad(`Unknown administrator permission: ${invalid[0]}`, 400, 'ADMIN_PERMISSION_UNKNOWN');
+  const normalized = new Set(value.map(String));
+  for (const permission of [...normalized]) {
+    if (!permission.endsWith('.manage')) continue;
+    const viewPermission = permission.replace(/\.manage$/, '.view');
+    if (ADMIN_PERMISSION_SET.has(viewPermission)) normalized.add(viewPermission);
+  }
+  return [...normalized].sort();
+}
+function adminUserOut(row) {
+  const configured = row.permissions_json != null;
+  const explicit = parseAdminPermissions(row.permissions_json);
+  const owner = row.role === 'owner';
+  return {
+    id: row.id,
+    name: row.name || row.email?.split('@')[0] || 'Admin',
+    email: row.email,
+    role: row.role || 'admin',
+    status: row.is_active === false ? 'inactive' : 'active',
+    is_active: row.is_active !== false,
+    twofa_enabled: row.twofa_enabled === true,
+    twofa_required: row.twofa_required === true,
+    twofa_setup_required: row.twofa_required === true && row.twofa_enabled !== true,
+    twofa_locked_until: row.twofa_locked_until ? String(row.twofa_locked_until) : '',
+    permissions_configured: owner || configured,
+    permissions: owner ? [...ADMIN_PERMISSION_CATALOG] : (explicit || [...ADMIN_PERMISSION_CATALOG]),
+    permission_catalog: [...ADMIN_PERMISSION_CATALOG],
+    lastLogin: row.last_login_at ? String(row.last_login_at) : '',
+    created_at: row.created_at ? String(row.created_at) : '',
+    updated_at: row.updated_at ? String(row.updated_at) : '',
+  };
+}
+
+function adminPermissionForRoute(method, path) {
+  const manage = method !== 'GET';
+  if (path === '/admin/me' || path.startsWith('/admin/me/') || path === '/admin/sessions' || path === '/admin/platform-context') return null;
+  if (path.startsWith('/admin/admin-users')) return 'owner';
+  if (path === '/admin/tenant-control-center' || path === '/admin/tenants' || path.startsWith('/admin/tenants/') || path.startsWith('/admin/platforms/') || path.startsWith('/admin/platform-domains/') || path.startsWith('/admin/platform-memberships/') || path.startsWith('/admin/platform-admin-users') || path.startsWith('/admin/domain-mapping') || path.startsWith('/admin/connector')) return `platform.${manage ? 'manage' : 'view'}`;
+  if (path.includes('audit-logs')) return 'audit.view';
+  if (path === '/admin/system-health' || path === '/admin/foundation-diagnostics' || path.includes('diagnostics')) return 'system.view';
+  if (path.startsWith('/admin/support')) return `support.${manage ? 'manage' : 'view'}`;
+  if (path.includes('/chat-') || path.includes('/chat/') || path.includes('unmatched-questions') || path.includes('incorrect-match-reports')) return `chat.${manage ? 'manage' : 'view'}`;
+  if (path.includes('theme') || path.includes('action-buttons') || path.includes('navigation') || path.includes('home-sections')) return `appearance.${manage ? 'manage' : 'view'}`;
+  if (path.startsWith('/admin/ai') || path.includes('prompt') || path.includes('knowledge') || path.includes('quality') || path.includes('locale-registry')) return `ai.${manage ? 'manage' : 'view'}`;
+  if (path.includes('dashboard')) return 'dashboard.view';
+  return `content.${manage ? 'manage' : 'view'}`;
+}
+function requireAdminRoutePermission(admin, method, path) {
+  const required = adminPermissionForRoute(method, path);
+  if (!required || admin?.role === 'owner') return;
+  if (required === 'owner') bad('Owner permission required', 403, 'OWNER_PERMISSION_REQUIRED');
+  if (admin.permissions == null) return; // Existing accounts preserve legacy access until the owner configures them.
+  if (!admin.permissions.includes(required)) bad(`Administrator permission required: ${required}`, 403, 'ADMIN_PERMISSION_DENIED');
+}
+function requireCompletedAdmin2fa(admin) {
+  if (admin?.twofa_setup_required) bad('Set up two-factor authentication before using Admin', 403, 'TWOFA_SETUP_REQUIRED');
+}
 
 // v0.6.2c: PBKDF2 100k caused runtime instability in Cloudflare Workers for some accounts.
 // New/changed admin passwords now use a fast salted SHA-256 format. Old PBKDF2 hashes are verified only
@@ -4977,6 +5095,11 @@ async function ensureAdminAuthReady(env) {
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`);
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_enabled BOOLEAN DEFAULT FALSE`);
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_secret TEXT`);
+  await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_required BOOLEAN NOT NULL DEFAULT FALSE`);
+  await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_last_counter BIGINT`);
+  await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_failed_attempts INTEGER NOT NULL DEFAULT 0`);
+  await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS twofa_locked_until TIMESTAMPTZ`);
+  await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS permissions_json TEXT`);
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS session_version INTEGER DEFAULT 0`);
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
   await q(env, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
@@ -5018,8 +5141,43 @@ async function ensureOwnerAdmin(env, forceDefaultPassword = false) {
   await audit(env, 'owner_created', 'admin_users', email, `Owner account created for ${email}`);
 }
 async function listAdminUsers(env) { const { rows } = await q(env, "SELECT * FROM admin_users ORDER BY CASE WHEN role='owner' THEN 0 ELSE 1 END, id ASC"); return rows.map(adminUserOut); }
-async function createAdminUser(env, actor, p = {}) { if (!p.email) bad('Email is required'); const password = String(p.password || p.new_password || ''); if (password.length < 12) bad('Password must be at least 12 characters'); const passwordHash = await hashPassword(password); const { rows } = await q(env, `INSERT INTO admin_users(name,email,password_hash,role,is_active) VALUES($1,$2,$3,$4,$5) RETURNING *`, [p.name || p.email.split('@')[0], String(p.email).trim().toLowerCase(), passwordHash, 'admin', p.status !== 'inactive' && p.is_active !== false]); await securityAudit(env, actor, 'create_admin', rows[0].id, `Created admin ${rows[0].email}`); return adminUserOut(rows[0]); }
-async function updateAdminUser(env, actor, id, p = {}) { const existing = (await q(env, 'SELECT * FROM admin_users WHERE id=$1', [id])).rows[0]; if (!existing) bad('Admin user not found', 404, 'ADMIN_NOT_FOUND'); const nextRole = existing.role === 'owner' ? 'owner' : 'admin'; const { rows } = await q(env, `UPDATE admin_users SET name=$1,email=$2,role=$3,is_active=$4,updated_at=NOW() WHERE id=$5 RETURNING *`, [p.name || existing.name || 'Admin', String(p.email || existing.email).trim().toLowerCase(), nextRole, existing.role === 'owner' ? true : (p.status ? p.status !== 'inactive' : p.is_active !== false), id]); await securityAudit(env, actor, 'update_admin', id, `Updated admin ${rows[0].email}`); return adminUserOut(rows[0]); }
+async function createAdminUser(env, actor, p = {}) {
+  if (!p.email) bad('Email is required');
+  const password = String(p.password || p.new_password || '');
+  if (password.length < 12) bad('Password must be at least 12 characters');
+  const passwordHash = await hashPassword(password);
+  const permissions = validatedAdminPermissions(p.permissions ?? ['dashboard.view']);
+  const { rows } = await q(env, `INSERT INTO admin_users(name,email,password_hash,role,is_active,permissions_json,twofa_required)
+    VALUES($1,$2,$3,'admin',$4,$5,$6) RETURNING *`, [
+    p.name || p.email.split('@')[0], String(p.email).trim().toLowerCase(), passwordHash,
+    p.status !== 'inactive' && p.is_active !== false, JSON.stringify(permissions), p.twofa_required === true,
+  ]);
+  await securityAudit(env, actor, 'create_admin', rows[0].id, `Created admin ${rows[0].email} with ${permissions.length} explicit permissions; 2FA required=${rows[0].twofa_required === true}`);
+  return adminUserOut(rows[0]);
+}
+async function updateAdminUser(env, actor, id, p = {}) {
+  const existing = (await q(env, 'SELECT * FROM admin_users WHERE id=$1', [id])).rows[0];
+  if (!existing) bad('Admin user not found', 404, 'ADMIN_NOT_FOUND');
+  const nextRole = existing.role === 'owner' ? 'owner' : 'admin';
+  const permissions = existing.role === 'owner'
+    ? null
+    : (Object.prototype.hasOwnProperty.call(p, 'permissions') ? validatedAdminPermissions(p.permissions) : parseAdminPermissions(existing.permissions_json));
+  const twofaRequired = existing.role === 'owner'
+    ? existing.twofa_required === true
+    : (Object.prototype.hasOwnProperty.call(p, 'twofa_required') ? p.twofa_required === true : existing.twofa_required === true);
+  const nextActive = existing.role === 'owner'
+    ? true
+    : (p.status ? p.status !== 'inactive' : (typeof p.is_active === 'boolean' ? p.is_active : existing.is_active !== false));
+  const { rows } = await q(env, `UPDATE admin_users
+    SET name=$1,email=$2,role=$3,is_active=$4,permissions_json=$5,twofa_required=$6,updated_at=NOW()
+    WHERE id=$7 RETURNING *`, [
+    p.name || existing.name || 'Admin', String(p.email || existing.email).trim().toLowerCase(), nextRole,
+    nextActive,
+    permissions == null ? existing.permissions_json : JSON.stringify(permissions), twofaRequired, id,
+  ]);
+  await securityAudit(env, actor, 'update_admin', id, `Updated admin ${rows[0].email}; explicit permissions=${rows[0].permissions_json == null ? 'legacy' : permissions.length}; 2FA required=${twofaRequired}`);
+  return adminUserOut(rows[0]);
+}
 async function changeAdminPassword(env, actor, id, p = {}) { const password = p.password || p.new_password; if (!password || String(password).length < 12) bad('Password must be at least 12 characters'); const target = (await q(env, 'SELECT id,email FROM admin_users WHERE id=$1 LIMIT 1', [id])).rows[0]; if (!target) bad('Admin user not found', 404, 'ADMIN_NOT_FOUND'); const passwordHash = await hashPassword(password); await q(env, 'UPDATE admin_users SET password_hash=$1, session_version=COALESCE(session_version,0)+1, updated_at=NOW() WHERE id=$2', [passwordHash, id]); await q(env, 'UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,NOW()) WHERE lower(admin_email)=lower($1) AND revoked_at IS NULL', [target.email]).catch(() => undefined); await securityAudit(env, actor, 'change_password', id, `Changed password and revoked sessions for ${target.email}`); return { ok: true, sessions_revoked: true }; }
 async function deleteAdminUser(env, actor, id) { const row = (await q(env, 'SELECT * FROM admin_users WHERE id=$1', [id])).rows[0]; if (!row) bad('Admin user not found', 404, 'ADMIN_NOT_FOUND'); if (row.role === 'owner') bad('Owner account cannot be deleted', 400); await q(env, 'DELETE FROM admin_users WHERE id=$1', [id]); await securityAudit(env, actor, 'delete_admin', id, `Deleted admin ${row.email}`); return { ok: true, deleted: 1 }; }
 
@@ -5037,8 +5195,10 @@ async function login(request, env) {
     try { await audit(env, 'login_failed', 'admin_users', email, 'Invalid login attempt', { actor_email:email }); } catch (_) {}
     return json({ detail: 'Invalid email or password' }, 401, env);
   }
-  if (user.twofa_enabled === true && !await verifyTotp(user.twofa_secret, p.twofa_code || p.otp || p.code)) {
-    return json({ twofa_required: true, detail: '2FA code required' }, 202, env);
+  if (user.twofa_enabled === true) {
+    const code = p.twofa_code || p.otp || p.code;
+    if (!code) return json({ twofa_required: true, detail: '2FA code required' }, 202, env);
+    await verifyAndConsumeAdminTotp(env, user, code, { invalidStatus:401 });
   }
   if (String(user.password_hash || '').startsWith('pbkdf2_sha256$') || String(user.password_hash || '').startsWith('sha256_salted$')) {
     await q(env, 'UPDATE admin_users SET password_hash=$1, updated_at=NOW() WHERE id=$2', [await hashPassword(password), user.id]);
@@ -5047,7 +5207,8 @@ async function login(request, env) {
   const nextUser = updated.rows[0] || user;
   await audit(env, 'login_success', 'admin_users', nextUser.id || nextUser.email, `Admin login ${nextUser.email}`, { actor_email:nextUser.email });
   const token = await createToken(env, nextUser.email, nextUser.role || 'admin', Number(nextUser.session_version || 0));
-  return json({ access_token: token, token_type: 'bearer', user: adminUserOut(nextUser) }, 200, env);
+  const publicUser = adminUserOut(nextUser);
+  return json({ access_token: token, token_type: 'bearer', user: publicUser, twofa_setup_required:publicUser.twofa_setup_required }, 200, env);
 }
 async function requireAdmin(request, env) { const auth = request.headers.get('Authorization') || ''; const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''; if (!token) bad('Missing token', 401); const user = await readToken(env, token); if (user.role === 'support_staff') bad('Support staff must use the Customer Service Console', 403, 'SUPPORT_STAFF_ADMIN_DENIED'); return user; }
 function b64UrlEncode(bytes) { return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''); }
@@ -5064,10 +5225,10 @@ async function readToken(env, token) {
   let payload;
   try { payload = JSON.parse(new TextDecoder().decode(b64UrlDecode(p))); } catch { bad('Invalid token', 401); }
   if (!payload?.email || payload.exp < Math.floor(Date.now()/1000)) bad('Expired token', 401);
-  const row = (await q(env, 'SELECT email, role, is_active, session_version, twofa_enabled FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [payload.email])).rows[0];
+  const row = (await q(env, 'SELECT email, role, is_active, session_version, twofa_enabled,twofa_required,permissions_json FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [payload.email])).rows[0];
   if (!row || row.is_active === false) bad('Admin session is no longer valid', 401);
   if (Number(row.session_version || 0) !== Number(payload.sv || 0)) bad('Admin session has been revoked', 401);
-  return { ...payload, email: row.email, role: row.role || payload.role, twofa_enabled: row.twofa_enabled === true };
+  return { ...payload, email: row.email, role: row.role || payload.role, twofa_enabled: row.twofa_enabled === true, twofa_required:row.twofa_required === true, twofa_setup_required:row.twofa_required === true && row.twofa_enabled !== true, permissions:parseAdminPermissions(row.permissions_json) };
 }
 function requireOwner(admin) { if (!admin || admin.role !== 'owner') bad('Owner permission required', 403); }
 async function verifyPassword(password, hash) {
@@ -6377,14 +6538,63 @@ async function totpCode(secret, stepOffset = 0) {
   const bin = ((sig[offset] & 0x7f) << 24) | ((sig[offset+1] & 0xff) << 16) | ((sig[offset+2] & 0xff) << 8) | (sig[offset+3] & 0xff);
   return String(bin % 1000000).padStart(6, '0');
 }
-async function verifyTotp(secret, code) {
+async function matchingTotpCounter(secret, code) {
   const clean = String(code || '').replace(/\s+/g,'');
-  if (!secret || !/^\d{6}$/.test(clean)) return false;
-  for (const off of [-1,0,1]) if (await totpCode(secret, off) === clean) return true;
-  return false;
+  if (!secret || !/^\d{6}$/.test(clean)) return null;
+  const current = Math.floor(Date.now() / 30000);
+  for (const off of [-1,0,1]) if (await totpCode(secret, off) === clean) return current + off;
+  return null;
+}
+async function totpEncryptionKey(env) {
+  if (!env.JWT_SECRET || String(env.JWT_SECRET).length < 32) bad('Server authentication is not configured', 503);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`admin-totp:v1:${env.JWT_SECRET}`));
+  return crypto.subtle.importKey('raw', digest, { name:'AES-GCM' }, false, ['encrypt','decrypt']);
+}
+async function encryptTotpSecret(env, secret) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, await totpEncryptionKey(env), new TextEncoder().encode(String(secret)));
+  return `enc$v1$${b64UrlEncode(iv)}$${b64UrlEncode(ciphertext)}`;
+}
+async function decryptTotpSecret(env, stored) {
+  const value = String(stored || '');
+  if (!value.startsWith('enc$v1$')) return value; // One-way compatibility for pre-v1.20.2 enrollments.
+  const parts = value.split('$');
+  if (parts.length !== 4) bad('Stored 2FA secret is invalid', 500, 'TWOFA_SECRET_INVALID');
+  try {
+    const plaintext = await crypto.subtle.decrypt({ name:'AES-GCM', iv:b64UrlDecode(parts[2]) }, await totpEncryptionKey(env), b64UrlDecode(parts[3]));
+    return new TextDecoder().decode(plaintext);
+  } catch { bad('Stored 2FA secret cannot be decrypted', 500, 'TWOFA_SECRET_DECRYPT_FAILED'); }
+}
+async function registerFailedAdminTotp(env, row) {
+  const result = await q(env, `UPDATE admin_users SET
+      twofa_failed_attempts=COALESCE(twofa_failed_attempts,0)+1,
+      twofa_locked_until=CASE WHEN COALESCE(twofa_failed_attempts,0)+1 >= 5 THEN NOW()+INTERVAL '10 minutes' ELSE twofa_locked_until END,
+      updated_at=NOW()
+    WHERE id=$1 RETURNING twofa_failed_attempts,twofa_locked_until`, [row.id]);
+  const state = result.rows[0] || {};
+  if (state.twofa_locked_until && new Date(state.twofa_locked_until).getTime() > Date.now()) {
+    bad('Too many invalid 2FA codes. Try again in 10 minutes.', 429, 'TWOFA_LOCKED');
+  }
+}
+async function verifyAndConsumeAdminTotp(env, row, code, options = {}) {
+  if (row.twofa_locked_until && new Date(row.twofa_locked_until).getTime() > Date.now()) {
+    bad('2FA verification is temporarily locked. Try again later.', 429, 'TWOFA_LOCKED');
+  }
+  const secret = await decryptTotpSecret(env, row.twofa_secret);
+  const counter = await matchingTotpCounter(secret, code);
+  if (counter == null) {
+    await registerFailedAdminTotp(env, row);
+    bad('Invalid 2FA code', Number(options.invalidStatus || 400), 'TWOFA_INVALID');
+  }
+  const encrypted = String(row.twofa_secret || '').startsWith('enc$v1$') ? row.twofa_secret : await encryptTotpSecret(env, secret);
+  const consumed = await q(env, `UPDATE admin_users SET
+      twofa_last_counter=$1,twofa_failed_attempts=0,twofa_locked_until=NULL,twofa_secret=$2,updated_at=NOW()
+    WHERE id=$3 AND (twofa_last_counter IS NULL OR twofa_last_counter < $1) RETURNING id`, [counter, encrypted, row.id]);
+  if (!consumed.rows[0]) bad('This 2FA code has already been used. Wait for a new code.', 409, 'TWOFA_REPLAYED');
+  return counter;
 }
 async function getOwnAdminProfile(env, admin) {
-  const row = (await q(env, 'SELECT id,name,email,role,is_active,twofa_enabled,last_login_at,created_at,updated_at FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
+  const row = (await q(env, 'SELECT id,name,email,role,is_active,twofa_enabled,twofa_required,twofa_locked_until,permissions_json,last_login_at,created_at,updated_at FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
   if (!row) bad('Admin not found', 404, 'ADMIN_NOT_FOUND');
   return adminUserOut(row);
 }
@@ -6394,10 +6604,12 @@ async function securityAudit(env, actor, action, target, details) {
   } catch (_) {}
 }
 async function requireOwnerStepUp(env, admin, p = {}) {
-  const owner = (await q(env, 'SELECT id,email,twofa_enabled,twofa_secret FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
+  const owner = (await q(env, 'SELECT id,email,twofa_enabled,twofa_secret,twofa_last_counter,twofa_failed_attempts,twofa_locked_until FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
   if (!owner) bad('Owner account not found', 404, 'OWNER_NOT_FOUND');
-  if (owner.twofa_enabled === true && !await verifyTotp(owner.twofa_secret, p.owner_code || p.twofa_code || p.otp || p.code)) {
-    bad('Enter the owner 2FA code to continue', 403, 'OWNER_2FA_REQUIRED');
+  if (owner.twofa_enabled === true) {
+    const code = p.owner_code || p.twofa_code || p.otp || p.code;
+    if (!code) bad('Enter the owner 2FA code to continue', 403, 'OWNER_2FA_REQUIRED');
+    await verifyAndConsumeAdminTotp(env, owner, code, { invalidStatus:403 });
   }
 }
 async function setupOwn2fa(env, admin) {
@@ -6405,7 +6617,7 @@ async function setupOwn2fa(env, admin) {
   if (!current) bad('Admin not found', 404, 'ADMIN_NOT_FOUND');
   if (current.twofa_enabled === true) bad('Disable existing 2FA before starting a new setup', 409, 'TWOFA_ALREADY_ENABLED');
   const secret = randomBase32Secret(20);
-  await q(env, 'UPDATE admin_users SET twofa_secret=$1, updated_at=NOW() WHERE id=$2 AND twofa_enabled=FALSE', [secret, current.id]);
+  await q(env, 'UPDATE admin_users SET twofa_secret=$1,twofa_last_counter=NULL,twofa_failed_attempts=0,twofa_locked_until=NULL,updated_at=NOW() WHERE id=$2 AND twofa_enabled=FALSE', [await encryptTotpSecret(env, secret), current.id]);
   const issuer = encodeURIComponent(appName(env));
   const account = encodeURIComponent(admin.email);
   await securityAudit(env, admin, '2fa_setup', admin.email, '2FA setup secret generated');
@@ -6414,7 +6626,7 @@ async function setupOwn2fa(env, admin) {
 async function enableOwn2fa(env, admin, p = {}) {
   const row = (await q(env, 'SELECT * FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
   if (!row?.twofa_secret) bad('Please generate 2FA setup first', 400);
-  if (!await verifyTotp(row.twofa_secret, p.code || p.twofa_code || p.otp)) bad('Invalid 2FA code', 400);
+  await verifyAndConsumeAdminTotp(env, row, p.code || p.twofa_code || p.otp);
   await q(env, 'UPDATE admin_users SET twofa_enabled=TRUE, updated_at=NOW() WHERE id=$1', [row.id]);
   await securityAudit(env, admin, '2fa_enabled', row.id, '2FA enabled');
   return { ok: true };
@@ -6422,8 +6634,9 @@ async function enableOwn2fa(env, admin, p = {}) {
 async function disableOwn2fa(env, admin, p = {}) {
   const row = (await q(env, 'SELECT * FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
   if (!row) bad('Admin not found', 404);
-  if (row.twofa_enabled && !await verifyTotp(row.twofa_secret, p.code || p.twofa_code || p.otp)) bad('Invalid 2FA code', 400);
-  await q(env, 'UPDATE admin_users SET twofa_enabled=FALSE, twofa_secret=NULL, updated_at=NOW() WHERE id=$1', [row.id]);
+  if (row.twofa_required === true) bad('The platform owner requires 2FA for this account', 409, 'TWOFA_REQUIRED_BY_OWNER');
+  if (row.twofa_enabled) await verifyAndConsumeAdminTotp(env, row, p.code || p.twofa_code || p.otp);
+  await q(env, 'UPDATE admin_users SET twofa_enabled=FALSE,twofa_secret=NULL,twofa_last_counter=NULL,twofa_failed_attempts=0,twofa_locked_until=NULL,updated_at=NOW() WHERE id=$1', [row.id]);
   await securityAudit(env, admin, '2fa_disabled', row.id, '2FA disabled');
   return { ok: true };
 }
@@ -6449,7 +6662,7 @@ async function resetAdmin2fa(env, admin, id, p = {}) {
   if (String(target.email).toLowerCase() === String(admin.email).toLowerCase()) bad('Disable your own 2FA from Account & Security', 400, 'ADMIN_SELF_ACTION_DENIED');
   if (String(p.confirmation || '').trim().toLowerCase() !== String(target.email).trim().toLowerCase()) bad('Type the target administrator email to confirm the reset', 400, 'ADMIN_CONFIRMATION_REQUIRED');
   await requireOwnerStepUp(env, admin, p);
-  await q(env, 'UPDATE admin_users SET twofa_enabled=FALSE, twofa_secret=NULL, session_version=COALESCE(session_version,0)+1, updated_at=NOW() WHERE id=$1', [id]);
+  await q(env, 'UPDATE admin_users SET twofa_enabled=FALSE,twofa_secret=NULL,twofa_last_counter=NULL,twofa_failed_attempts=0,twofa_locked_until=NULL,session_version=COALESCE(session_version,0)+1,updated_at=NOW() WHERE id=$1', [id]);
   await q(env, 'UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,NOW()) WHERE lower(admin_email)=lower($1) AND revoked_at IS NULL', [target.email]).catch(() => undefined);
   await securityAudit(env, admin, 'reset_2fa', id, `Owner reset 2FA and revoked sessions for ${target.email}`);
   return { ok: true, admin_id: Number(target.id), twofa_enabled: false, sessions_revoked: true };

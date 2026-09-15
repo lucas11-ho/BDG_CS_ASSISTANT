@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -21,7 +21,9 @@ import { useAdminI18n } from "@/i18n/runtime";
 
 type Props = {
   open: boolean;
+  required?: boolean;
   onClose: () => void;
+  onProfileChange?: (profile: AdminProfile) => void;
 };
 
 type AdminProfile = {
@@ -31,6 +33,9 @@ type AdminProfile = {
   role?: string;
   status?: string;
   twofa_enabled?: boolean;
+  twofa_required?: boolean;
+  twofa_setup_required?: boolean;
+  permissions?: string[];
   lastLogin?: string;
 };
 
@@ -43,16 +48,20 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-export default function AccountSecurityDrawer({ open, onClose }: Props) {
+export default function AccountSecurityDrawer({ open, required = false, onClose, onProfileChange }: Props) {
   const { t } = useAdminI18n();
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [setup, setSetup] = useState<SetupResult | null>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const profileChangeRef = useRef(onProfileChange);
+  profileChangeRef.current = onProfileChange;
 
   const load = useCallback(async () => {
     const result = (await api.getMe()) as AdminProfile & { user?: AdminProfile };
-    setProfile(result?.user || result || null);
+    const next = result?.user || result || null;
+    setProfile(next);
+    if (next) profileChangeRef.current?.(next);
   }, []);
 
   useEffect(() => {
@@ -120,12 +129,23 @@ export default function AccountSecurityDrawer({ open, onClose }: Props) {
       width={520}
       open={open}
       onClose={onClose}
+      closable={!required}
+      maskClosable={!required}
+      keyboard={!required}
       destroyOnHidden
     >
       {!profile ? (
         <Skeleton active paragraph={{ rows: 7 }} />
       ) : (
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          {required ? (
+            <Alert
+              type="error"
+              showIcon
+              message={t("Two-factor authentication setup is required")}
+              description={t("The platform owner requires 2FA for this account. Set it up before using the Admin console.")}
+            />
+          ) : null}
           <Card size="small" className="bdg-card">
             <Descriptions column={1} size="small">
               <Descriptions.Item label={t("Name")}>{profile.name || "—"}</Descriptions.Item>
@@ -171,10 +191,15 @@ export default function AccountSecurityDrawer({ open, onClose }: Props) {
                   okButtonProps={{ danger: true }}
                   onConfirm={disable}
                 >
-                  <Button danger loading={busy} style={{ marginTop: 12 }}>
+                  <Button danger loading={busy} disabled={profile.twofa_required} style={{ marginTop: 12 }}>
                     {t("Disable 2FA")}
                   </Button>
                 </Popconfirm>
+                {profile.twofa_required ? (
+                  <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+                    {t("2FA is required by the platform owner and cannot be disabled.")}
+                  </Typography.Paragraph>
+                ) : null}
               </>
             ) : setup ? (
               <>

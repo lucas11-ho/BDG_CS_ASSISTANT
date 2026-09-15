@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, message } from "antd";
+import { Alert, Button, Checkbox, Drawer, Form, Input, Popconfirm, Select, Space, Switch, Table, Tag, Typography, message } from "antd";
 import {
   DeleteOutlined,
   EditOutlined,
@@ -24,7 +24,21 @@ type AdminUser = {
   status: string;
   lastLogin?: string;
   twofa_enabled?: boolean;
+  twofa_required?: boolean;
+  permissions?: string[];
+  permissions_configured?: boolean;
 };
+
+const PERMISSION_OPTIONS = [
+  "dashboard.view",
+  "platform.view", "platform.manage",
+  "content.view", "content.manage",
+  "ai.view", "ai.manage",
+  "support.view", "support.manage",
+  "chat.view", "chat.manage",
+  "appearance.view", "appearance.manage",
+  "audit.view", "system.view",
+];
 
 function AdminUsersPage() {
   const { t } = useAdminI18n();
@@ -60,7 +74,12 @@ function AdminUsersPage() {
   const create = () => {
     setEditing(null);
     form.resetFields();
-    form.setFieldsValue({ role: platformContext ? "platform_admin" : "admin", status: "active" });
+    form.setFieldsValue({
+      role: platformContext ? "platform_admin" : "admin",
+      status: "active",
+      twofa_required: !platformContext,
+      permissions: ["dashboard.view"],
+    });
     setOpen(true);
   };
 
@@ -152,6 +171,12 @@ function AdminUsersPage() {
       width: 110,
       render: (value) => <Tag color={value ? "green" : "orange"}>{t(value ? "Enabled" : "Disabled")}</Tag>,
     },
+    ...(!platformContext ? [{
+      title: t("2FA policy"),
+      dataIndex: "twofa_required",
+      width: 130,
+      render: (value: boolean) => <Tag color={value ? "blue" : "default"}>{t(value ? "Required" : "Optional")}</Tag>,
+    }] : []),
     { title: t("Last login"), dataIndex: "lastLogin", width: 190, render: (value) => value || "—" },
     {
       title: t("Actions"),
@@ -265,6 +290,38 @@ function AdminUsersPage() {
           <Form.Item name="status" label={t("Status")}>
             <Select options={[{ value: "active", label: t("Active") }, { value: "inactive", label: t("Inactive") }]} />
           </Form.Item>
+          {!platformContext && editing?.role !== "owner" ? (
+            <>
+              <Form.Item name="twofa_required" label={t("Require two-factor authentication")} valuePropName="checked">
+                <Switch />
+              </Form.Item>
+              <Alert
+                type="info"
+                showIcon
+                message={t("Backend-enforced permissions")}
+                description={t("The administrator sees only allowed areas, and direct API requests are rejected by the server.")}
+                style={{ marginBottom: 16 }}
+              />
+              <Form.Item
+                name="permissions"
+                label={t("Admin permissions")}
+                rules={[{ required: true, type: "array", min: 1, message: t("Select at least one permission") }]}
+              >
+                <Checkbox.Group style={{ width: "100%" }}>
+                  <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                    {PERMISSION_OPTIONS.map((permission) => (
+                      <Checkbox key={permission} value={permission}>
+                        <Typography.Text>{t(permission)}</Typography.Text>
+                      </Checkbox>
+                    ))}
+                  </Space>
+                </Checkbox.Group>
+              </Form.Item>
+            </>
+          ) : null}
+          {!platformContext && editing?.role === "owner" ? (
+            <Alert type="success" showIcon message={t("The owner always has full access and cannot be restricted.")} />
+          ) : null}
         </Form>
       </Drawer>
 

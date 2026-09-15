@@ -8,6 +8,7 @@ import {
   Breadcrumb,
   Select,
   Tag,
+  Alert,
   ConfigProvider,
   theme,
 } from "antd";
@@ -32,11 +33,11 @@ import {
   ApartmentOutlined,
 } from "@ant-design/icons";
 import { Link, useLocation, useNavigate, useMatches } from "@tanstack/react-router";
-import { api, getActiveAdminPlatformRoute, getCurrentUser, logout } from "@/lib/api";
+import { api, getActiveAdminPlatformRoute, getCurrentUser, logout, setCurrentUser } from "@/lib/api";
 import AccountSecurityDrawer from "@/components/AccountSecurityDrawer";
 
 const { Sider, Header, Content } = Layout;
-const ADMIN_VERSION = "v1.19.1";
+const ADMIN_VERSION = "v1.20.2";
 
 const NAV: { key: string; to: string; label: string; icon: ReactNode; group?: string }[] = [
   {
@@ -212,10 +213,23 @@ function tr(v?: string) {
   return lang === "zh" ? ZH[v] || v : lang === "my" ? MY[v] || v : v;
 }
 
-function buildMenu(userRole?: string, canManagePlatform = false): MenuProps["items"] {
+function permissionForNav(item: (typeof NAV)[number]) {
+  if (item.key === "/admin-users") return "platform.manage";
+  if (item.key === "/audit-logs") return "audit.view";
+  if (item.group === "PLATFORM") return "platform.view";
+  if (item.group === "CONTENT") return "content.view";
+  if (item.group === "AI") return "ai.view";
+  if (item.group === "CUSTOMER SERVICE") return "support.view";
+  if (item.group === "CHAT") return "chat.view";
+  if (item.group === "APPEARANCE" || item.group === "ENGAGEMENT") return "appearance.view";
+  return "dashboard.view";
+}
+
+function buildMenu(userRole?: string, permissions: string[] = [], canManagePlatform = false): MenuProps["items"] {
   const groups = new Map<string, typeof NAV>();
   for (const item of NAV) {
     if (item.key === "/admin-users" && userRole !== "owner" && !(getActiveAdminPlatformRoute() && canManagePlatform)) continue;
+    if (userRole !== "owner" && !permissions.includes(permissionForNav(item))) continue;
     const g = item.group || "";
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g)!.push(item);
@@ -248,13 +262,15 @@ export default function AdminLayout({
   const [collapsed, setCollapsed] = useState(false);
   const [adminLang, setAdminLang] = useState(langNow());
   const [platformContext, setPlatformContext] = useState<any>(null);
-  const [securityOpen, setSecurityOpen] = useState(false);
-  const user = getCurrentUser();
+  const [securityOpen, setSecurityOpen] = useState(() => getCurrentUser()?.twofa_setup_required === true);
+  const [user, setUser] = useState<any>(() => getCurrentUser());
   const location = useLocation();
   const navigate = useNavigate();
   const matches = useMatches();
   const currentSearch = typeof window !== "undefined" ? window.location.search : "";
   const current = NAV.find((n) => n.to.includes("?") ? `${location.pathname}${currentSearch}` === n.to : location.pathname.startsWith(n.key));
+  const effectivePermissions: string[] = platformContext?.access?.permissions || user?.permissions || [];
+  const canViewCurrent = user?.role === "owner" || !current || effectivePermissions.includes(permissionForNav(current));
 
   useEffect(() => {
     if (!getActiveAdminPlatformRoute()) { setPlatformContext(null); return; }
@@ -263,17 +279,25 @@ export default function AdminLayout({
     return () => { alive = false; };
   }, [location.pathname]);
 
+  useEffect(() => {
+    api.getMe().then((result: any) => {
+      const next = result?.user || result;
+      if (!next) return;
+      setCurrentUser(next);
+      setUser(next);
+      if (next.twofa_setup_required) setSecurityOpen(true);
+    }).catch(() => undefined);
+  }, []);
+
   const crumbTitle = title ?? current?.label ?? "Dashboard";
 
   const userMenu: MenuProps["items"] = [
-    ...(user?.role === "owner"
-      ? [{
+    ...([{
           key: "profile",
           icon: <UserOutlined />,
           label: tr("Account & Security"),
           onClick: () => setSecurityOpen(true),
-        }, { type: "divider" as const }]
-      : []),
+        }, { type: "divider" as const }]),
     {
       key: "logout",
       icon: <LogoutOutlined />,
@@ -325,7 +349,7 @@ export default function AdminLayout({
           <Menu
             mode="inline"
             selectedKeys={current ? [current.key] : []}
-            items={buildMenu(user?.role, platformContext?.access?.can_manage_platform === true)}
+            items={buildMenu(user?.role, platformContext?.access?.permissions || user?.permissions || [], platformContext?.access?.can_manage_platform === true)}
             key={adminLang}
             style={{ paddingBottom: 24 }}
           />
@@ -385,13 +409,27 @@ export default function AdminLayout({
                 {subtitle && <div className="bdg-page-sub">{subtitle}</div>}
               </div>
             </div>
-            {children}
+            {canViewCurrent ? children : (
+              <Alert
+                type="error"
+                showIcon
+                message={tr("Permission denied")}
+                description={tr("Your administrator account does not have permission to open this area.")}
+              />
+            )}
           </Content>
         </Layout>
       </Layout>
-      {user?.role === "owner" ? (
-        <AccountSecurityDrawer open={securityOpen} onClose={() => setSecurityOpen(false)} />
-      ) : null}
+      <AccountSecurityDrawer
+        open={securityOpen}
+        required={user?.twofa_setup_required === true}
+        onClose={() => { if (!user?.twofa_setup_required) setSecurityOpen(false); }}
+        onProfileChange={(next) => {
+          setCurrentUser(next);
+          setUser(next);
+          if (!next.twofa_setup_required) setSecurityOpen(false);
+        }}
+      />
     </ConfigProvider>
   );
 }
