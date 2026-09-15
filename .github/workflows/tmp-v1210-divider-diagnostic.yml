@@ -13,20 +13,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Find incompatible Divider orientation
-        shell: python
+      - name: Find incompatible Divider orientation with exact JS regex
+        shell: bash
         run: |
-          from pathlib import Path
-          import re
-          pattern = re.compile(r'<Divider[^>]*\borientation=["\'\"](?:left|right|center)["\'\"]', re.I)
-          found = False
-          for path in Path('admin-pro/src').rglob('*'):
-              if path.suffix.lower() not in {'.ts', '.tsx', '.js', '.jsx'}:
-                  continue
-              text = path.read_text(encoding='utf-8')
-              for line_no, line in enumerate(text.splitlines(), 1):
-                  if pattern.search(line):
-                      found = True
-                      print(f'OFFENDER {path}:{line_no}: {line.strip()}')
-          if not found:
-              print('NO_OFFENDER_FOUND')
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          function walk(dir) {
+            const out = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) out.push(...walk(full));
+              else if (/\.(?:tsx?|jsx?)$/.test(entry.name)) out.push(full);
+            }
+            return out;
+          }
+          let found = 0;
+          for (const file of walk('admin-pro/src')) {
+            const text = fs.readFileSync(file, 'utf8');
+            const regex = /<Divider[^>]*\borientation=["'](?:left|right|center)["']/ig;
+            for (const match of text.matchAll(regex)) {
+              found += 1;
+              const line = text.slice(0, match.index).split('\n').length;
+              console.log(`OFFENDER ${file}:${line}: ${match[0]}`);
+            }
+          }
+          console.log(`OFFENDER_COUNT=${found}`);
+          NODE
+      - name: Reproduce R4 regression
+        shell: bash
+        run: node backend-api/scripts/v1.17.4-r4-ant-design-v6-type-compatibility-regression-test.js || true
