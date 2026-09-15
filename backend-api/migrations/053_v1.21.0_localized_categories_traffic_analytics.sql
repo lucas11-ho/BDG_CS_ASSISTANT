@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS category_translations (
   category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
   tenant_id INTEGER,
   platform_id INTEGER,
-  locale VARCHAR(32) NOT NULL,
+  locale VARCHAR(32) NOT NULL CHECK (locale = lower(locale)),
   name VARCHAR(120) NOT NULL,
   description TEXT DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -16,10 +16,10 @@ CREATE TABLE IF NOT EXISTS category_translations (
 CREATE INDEX IF NOT EXISTS idx_category_translations_platform_locale
   ON category_translations(platform_id, locale, category_id);
 
--- Existing category name/description become the default-locale translation.
+-- Existing category name/description become the normalized default-locale translation.
 INSERT INTO category_translations(category_id, tenant_id, platform_id, locale, name, description)
 SELECT c.id, c.tenant_id, c.platform_id,
-       COALESCE(NULLIF(p.default_locale, ''), 'en'),
+       lower(replace(COALESCE(NULLIF(p.default_locale, ''), 'en'), '_', '-')),
        c.name, COALESCE(c.description, '')
 FROM categories c
 LEFT JOIN saas_platforms p ON p.id=c.platform_id
