@@ -44,6 +44,7 @@ for (const token of [
   'enrichCategoryListResponse',
   'closeLocalizedContentAnalyticsPools',
 ]) assert.ok(server.includes(token), `server is not wired for ${token}`);
+assert.ok(server.includes("path.startsWith('/admin/content-bulk/') && request.method.toUpperCase() !== 'OPTIONS'"), 'legacy bulk-content dispatch contract must remain intact');
 
 for (const token of [
   'title: "Locale"',
