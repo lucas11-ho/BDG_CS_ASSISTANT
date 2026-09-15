@@ -25,6 +25,13 @@ import {
   handleFaqTopicBulkRoute,
   persistFaqTopicFromResponse,
 } from './faq-topics.js';
+import {
+  closeLocalizedContentAnalyticsPools,
+  enrichCategoryListResponse,
+  handleCategoryLocaleAdminRoute,
+  handleTrafficAdminRoute,
+  handleTrafficPublicRoute,
+} from './localized-categories-analytics.js';
 
 const env = getRuntimeEnv();
 const API_VERSION = '1.20.2-admin-2fa-permissions';
@@ -182,7 +189,9 @@ const API_FEATURES = [
   'bulk-content-cors-preflight',
   'bulk-content-locale-schema-compat',
   'localized-faq-topics',
-  'faq-topic-excel-import-export'
+  'faq-topic-excel-import-export',
+  'localized-categories',
+  'first-party-traffic-analytics'
 ];
 validateRuntimeEnv(env);
 env.GUIDE_IMAGES = createR2Adapter(env);
@@ -270,6 +279,35 @@ async function authenticatedBulkResponse(request, env, url, path, requestHeaders
   return handleBulkContentRoute(request, env, scope);
 }
 
+async function authenticatedContentAnalyticsResponse(request, env, url, path, requestHeaders, signal) {
+  const contextRequest = new Request(new URL('/admin/platform-context', url.origin), { method: 'GET', headers: requestHeaders, signal });
+  const contextResponse = await api.fetch(contextRequest, env);
+  if (!contextResponse.ok) return contextResponse;
+  const meRequest = new Request(new URL('/admin/me', url.origin), { method: 'GET', headers: requestHeaders, signal });
+  const meResponse = await api.fetch(meRequest, env);
+  if (!meResponse.ok) return meResponse;
+  const context = await contextResponse.json();
+  const me = await meResponse.json();
+  const user = me?.user || me || {};
+  const access = context?.access || {};
+  const scope = { ...(context?.platform || {}), ...access };
+  const owner = String(user?.role || '').toLowerCase() === 'owner';
+  const permissions = Array.isArray(user?.permissions) ? user.permissions : [];
+  const method = request.method.toUpperCase();
+  const isWrite = method !== 'GET';
+  const denied = (permission) => !owner && !permissions.includes(permission);
+  if (path === '/admin/analytics/summary') {
+    if (denied('dashboard.view')) return new Response(JSON.stringify({ ok:false,error:'Administrator permission required: dashboard.view',code:'ADMIN_PERMISSION_DENIED' }), { status:403,headers:{ 'Content-Type':'application/json; charset=utf-8' } });
+    return handleTrafficAdminRoute(request, env, scope);
+  }
+  if (path.startsWith('/admin/categories')) {
+    const permission = isWrite ? 'content.manage' : 'content.view';
+    if (denied(permission)) return new Response(JSON.stringify({ ok:false,error:`Administrator permission required: ${permission}`,code:'ADMIN_PERMISSION_DENIED' }), { status:403,headers:{ 'Content-Type':'application/json; charset=utf-8' } });
+    return handleCategoryLocaleAdminRoute(request, env, scope);
+  }
+  return null;
+}
+
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
   const requestId = String(req.headers['x-request-id'] || randomUUID());
@@ -305,12 +343,20 @@ const server = http.createServer(async (req, res) => {
       signal:requestAbort.signal,
       ...(body ? { duplex: 'half' } : {}),
     });
-    let response = path.startsWith('/admin/content-bulk/') && request.method.toUpperCase() !== 'OPTIONS'
-      ? await authenticatedBulkResponse(request, env, url, path, requestHeaders, requestAbort.signal)
-      : await api.fetch(request, env);
+    const method = request.method.toUpperCase();
+    const isTrafficWrite = method === 'POST' && (path === '/public/analytics/pageview' || path === '/public/analytics/heartbeat');
+    const isContentAnalyticsAdmin = path === '/admin/analytics/summary'
+      || path === '/admin/categories/locales'
+      || /^\/admin\/categories\/\d+\/translations(?:\/[^/]+)?$/.test(path);
+    let response = isTrafficWrite
+      ? await handleTrafficPublicRoute(request, env)
+      : isContentAnalyticsAdmin
+        ? await authenticatedContentAnalyticsResponse(request, env, url, path, requestHeaders, requestAbort.signal)
+        : path.startsWith('/admin/content-bulk/') && request.method.toUpperCase() !== 'OPTIONS'
+          ? await authenticatedBulkResponse(request, env, url, path, requestHeaders, requestAbort.signal)
+          : await api.fetch(request, env);
     if (!response) throw Object.assign(new Error('Bulk content route was not found'), { status: 404 });
 
-    const method = request.method.toUpperCase();
     const isFaqWrite = response.ok && ((method === 'POST' && path === '/admin/faqs') || (method === 'PUT' && /^\/admin\/faqs\/\d+$/.test(path)));
     const isFaqRead = response.ok && method === 'GET' && (path === '/admin/faqs' || path === '/faqs' || path === '/public/faqs');
     if (isFaqWrite) {
@@ -318,6 +364,13 @@ const server = http.createServer(async (req, res) => {
       response = await enrichFaqTopicResponse(response, env);
     } else if (isFaqRead) {
       response = await enrichFaqTopicResponse(response, env);
+    }
+    const isCategoryListRead = response.ok && method === 'GET' && (path === '/admin/categories' || path === '/categories' || path === '/public/categories');
+    if (isCategoryListRead) {
+      response = await enrichCategoryListResponse(response, env, {
+        admin: path === '/admin/categories',
+        language: url.searchParams.get('language') || url.searchParams.get('lang') || '',
+      });
     }
 
     const headers = Object.fromEntries(response.headers.entries());
@@ -392,6 +445,7 @@ async function shutdown(signal) {
     await supportGateway.close().catch(() => undefined);
     await closeSupportEventBus().catch(() => undefined);
     await closeFaqTopicPools().catch(() => undefined);
+    await closeLocalizedContentAnalyticsPools().catch(() => undefined);
     await closeDatabasePools();
     process.exit(0);
   });
