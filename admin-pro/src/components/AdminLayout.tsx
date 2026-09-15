@@ -427,7 +427,7 @@ export default function AdminLayout({
         onProfileChange={(next) => {
           setCurrentUser(next);
           setUser(next);
-          if (!next.twofa_setup_required) setSecurityOpen(false);
+          if (user?.twofa_setup_required && !next.twofa_setup_required) setSecurityOpen(false);
         }}
       />
     </ConfigProvider>

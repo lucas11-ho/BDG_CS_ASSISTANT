@@ -41,6 +41,10 @@ assert.ok(core.includes("admin?.role === 'owner'"));
 assert.ok(api.includes("hasAdminPermission"));
 assert.ok(layout.includes("permissionForNav"));
 assert.ok(layout.includes("user?.twofa_setup_required"));
+assert.ok(
+  layout.includes("if (user?.twofa_setup_required && !next.twofa_setup_required) setSecurityOpen(false);"),
+  "Account & Security must stay open after an ordinary profile refresh",
+);
 assert.ok(security.includes("required={") || security.includes("required = false"));
 assert.ok(security.includes("maskClosable={!required}"));
 assert.ok(users.includes('name="permissions"'));
