@@ -9,6 +9,7 @@ const categories = read('../../admin-pro/src/routes/_admin.categories.tsx');
 const analytics = read('../../admin-pro/src/routes/_admin.analytics.tsx');
 const dashboard = read('../../admin-pro/src/routes/_admin.dashboard.tsx');
 const layout = read('../../admin-pro/src/components/AdminLayout.tsx');
+const adminRouteTree = read('../../admin-pro/src/routeTree.gen.ts');
 const guideTracker = read('../../guide-pro/src/lib/traffic-analytics.ts');
 const publicRoot = read('../../guide-pro/src/routes/_public.tsx');
 
@@ -68,6 +69,8 @@ for (const token of [
 ]) assert.ok(analytics.includes(token), `missing analytics UX: ${token}`);
 assert.ok(layout.includes('key: "/analytics"'));
 assert.ok(layout.includes('group: "ANALYTICS"'));
+assert.ok(adminRouteTree.includes("./routes/_admin.analytics"), 'generated Admin route tree must include the analytics route');
+assert.ok(adminRouteTree.includes("'/analytics': typeof AdminAnalyticsRoute"), 'analytics route must be typed for Admin links');
 assert.ok(dashboard.includes('Live Website Traffic'));
 assert.ok(dashboard.includes('getTrafficAnalytics("7d")'));
 
