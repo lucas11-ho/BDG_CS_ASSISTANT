@@ -1,23 +1,73 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space, Table, Tag, Upload, message } from "antd";
-import { DeleteOutlined, EditOutlined, PlusOutlined, UploadOutlined } from "@ant-design/icons";
+import {
+  Alert,
+  Button,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  Popconfirm,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Upload,
+  message,
+} from "antd";
+import {
+  CheckCircleOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  StopOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
 import RichKnowledgeEditor from "@/components/RichKnowledgeEditor";
 import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/_admin/faq")({ component: FaqStudioPage });
 const blankDoc = JSON.stringify({ type: "doc", content: [{ type: "paragraph" }] });
 
+function faqUpdatePayload(row: any, status?: string) {
+  return {
+    question: row.question,
+    answer: row.answer || "",
+    answer_html: row.answer_html || "",
+    answer_json: row.answer_json || blankDoc,
+    image_urls: Array.isArray(row.image_urls) ? row.image_urls : [],
+    locale: row.locale || "en",
+    topic: String(row.topic || row.category || "General").trim() || "General",
+    keywords: row.keywords || "",
+    priority: Number(row.priority || 100),
+    status: status || row.status || "draft",
+  };
+}
+
+async function inChunks<T>(items: T[], size: number, worker: (item: T) => Promise<unknown>) {
+  for (let index = 0; index < items.length; index += size) {
+    await Promise.all(items.slice(index, index + size).map(worker));
+  }
+}
+
 function FaqStudioPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [editing, setEditing] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [localeOptions, setLocaleOptions] = useState<{ value: string; label: string }[]>([]);
   const [defaultLocale, setDefaultLocale] = useState("en");
   const [answerJson, setAnswerJson] = useState(blankDoc);
   const [answerHtml, setAnswerHtml] = useState("");
   const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const [localeFilter, setLocaleFilter] = useState<string | undefined>();
+  const [topicFilter, setTopicFilter] = useState<string | undefined>();
+  const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [form] = Form.useForm();
 
   const load = async () => {
@@ -33,11 +83,34 @@ function FaqStudioPage() {
         : [];
       setLocaleOptions(options);
       setDefaultLocale(String(registry?.default_locale || options[0]?.value || "en"));
+      setSelectedRowKeys([]);
     } catch (error: any) {
       message.error(error?.message || "Could not load FAQs or platform locales");
     } finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
+
+  const topicOptions = useMemo(() => [...new Set(rows.map((row) => String(row.topic || row.category || "General").trim() || "General"))]
+    .sort((a, b) => a.localeCompare(b))
+    .map((value) => ({ value, label: value })), [rows]);
+
+  const filteredRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return rows.filter((row) => {
+      const matchesSearch = !needle || [row.question, row.answer, row.keywords, row.topic, row.category]
+        .some((value) => String(value || "").toLowerCase().includes(needle));
+      const matchesLocale = !localeFilter || String(row.locale || "en") === localeFilter;
+      const topic = String(row.topic || row.category || "General").trim() || "General";
+      const matchesTopic = !topicFilter || topic === topicFilter;
+      const matchesStatus = !statusFilter || String(row.status || "draft") === statusFilter;
+      return matchesSearch && matchesLocale && matchesTopic && matchesStatus;
+    });
+  }, [rows, search, localeFilter, topicFilter, statusFilter]);
+
+  const selectedRows = useMemo(() => {
+    const selected = new Set(selectedRowKeys.map(String));
+    return rows.filter((row) => selected.has(String(row.id)));
+  }, [rows, selectedRowKeys]);
 
   const openEditor = (item?: any) => {
     const current = item || { question: "", topic: "General", locale: defaultLocale || localeOptions[0]?.value || "en", status: "published", priority: 100, keywords: "" };
@@ -65,32 +138,94 @@ function FaqStudioPage() {
     finally { setSaving(false); }
   };
   const remove = async (id: number) => { try { await api.remove("faq", id); message.success("FAQ deleted"); await load(); } catch (error: any) { message.error(error?.message || "Delete failed"); } };
+
+  const bulkSetStatus = async (status: "published" | "draft") => {
+    if (!selectedRows.length) return;
+    setBulkBusy(true);
+    try {
+      await inChunks(selectedRows, 8, (row) => api.update("faq", row.id, faqUpdatePayload(row, status)));
+      message.success(`${selectedRows.length} FAQ${selectedRows.length === 1 ? "" : "s"} moved to ${status}`);
+      await load();
+    } catch (error: any) { message.error(error?.message || `Bulk ${status} failed`); }
+    finally { setBulkBusy(false); }
+  };
+
+  const bulkDelete = async () => {
+    if (!selectedRows.length) return;
+    setBulkBusy(true);
+    try {
+      await inChunks(selectedRows, 8, (row) => api.remove("faq", row.id));
+      message.success(`${selectedRows.length} selected FAQ${selectedRows.length === 1 ? "" : "s"} deleted`);
+      await load();
+    } catch (error: any) { message.error(error?.message || "Bulk delete failed"); }
+    finally { setBulkBusy(false); }
+  };
+
+  const clearFilters = () => { setSearch(""); setLocaleFilter(undefined); setTopicFilter(undefined); setStatusFilter(undefined); };
+  const selectAllFiltered = () => setSelectedRowKeys(filteredRows.map((row) => row.id));
+
   const columns = useMemo(() => [
-    { title: "Question", dataIndex: "question", render: (v: string) => <b>{v}</b> },
-    { title: "Locale", dataIndex: "locale", width: 90, render: (v: string) => <Tag>{String(v || "en").toUpperCase()}</Tag> },
-    { title: "Topic", dataIndex: "topic", width: 150, render: (v: string) => <Tag color="blue">{v || "General"}</Tag> },
+    { title: "Question", dataIndex: "question", render: (value: string) => <b>{value}</b> },
+    { title: "Locale", dataIndex: "locale", width: 100, render: (value: string) => <Tag>{String(value || "en").toUpperCase()}</Tag> },
+    { title: "Topic", dataIndex: "topic", width: 160, render: (value: string) => <Tag color="blue">{value || "General"}</Tag> },
     { title: "Answer", dataIndex: "answer", ellipsis: true },
-    { title: "Status", dataIndex: "status", width: 110, render: (v: string) => <Tag color={v === "published" ? "green" : "gold"}>{v}</Tag> },
-    { title: "Actions", width: 150, render: (_: any, row: any) => <Space><Button size="small" icon={<EditOutlined />} onClick={() => openEditor(row)}>Edit</Button><Popconfirm title="Delete this FAQ?" onConfirm={() => remove(row.id)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
+    { title: "Status", dataIndex: "status", width: 115, render: (value: string) => <Tag color={value === "published" ? "green" : value === "archived" ? "default" : "gold"}>{value || "draft"}</Tag> },
+    { title: "Actions", width: 150, render: (_: any, row: any) => <Space><Button size="small" icon={<EditOutlined />} onClick={() => openEditor(row)}>Edit</Button><Popconfirm title="Delete this FAQ?" description="This removes the selected FAQ from the current platform." onConfirm={() => remove(row.id)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ], []);
 
   return <>
-    <Alert showIcon type="info" message="Rich FAQ Studio" description="FAQ answers support formatted text, colors, highlights, links, tables, uploaded images, and a localized Topic. Write the Topic in the same language as the FAQ locale—for example English: Deposit, Hindi: जमा, Myanmar: ငွေသွင်း—so the public FAQ grouping is understandable in every language." style={{ marginBottom: 12 }} />
-    <div className="bdg-filters" style={{ marginBottom: 12 }}><div style={{ flex: 1, color: "#8ea0bd" }}>Answers remain backward-compatible with the plain FAQ field. Platform locales: {localeOptions.length ? localeOptions.map((locale) => locale.value).join(", ") : "loading…"}</div><Button onClick={() => void load()}>Refresh</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>New FAQ</Button></div>
-    <Table rowKey="id" loading={loading} dataSource={rows} columns={columns as any} pagination={{ pageSize: 20 }} scroll={{ x: 980 }} />
+    <Alert showIcon type="info" message="FAQ Management v2" description="Search and filter FAQs by language, topic and status. Select individual rows, the current page, or all filtered results, then publish, move to draft, or delete the selection in one workflow." style={{ marginBottom: 12 }} />
+
+    <div className="bdg-filters" style={{ marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <Input allowClear prefix={<SearchOutlined />} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search question, answer, keywords or topic" style={{ minWidth: 280, flex: "1 1 320px" }} />
+      <Select allowClear showSearch optionFilterProp="label" value={localeFilter} onChange={setLocaleFilter} options={localeOptions} placeholder="All locales" style={{ width: 190 }} />
+      <Select allowClear showSearch optionFilterProp="label" value={topicFilter} onChange={setTopicFilter} options={topicOptions} placeholder="All topics" style={{ width: 180 }} />
+      <Select allowClear value={statusFilter} onChange={setStatusFilter} options={["published", "draft", "archived"].map((value) => ({ value, label: value }))} placeholder="All statuses" style={{ width: 150 }} />
+      <Button onClick={clearFilters}>Clear filters</Button>
+      <Button icon={<ReloadOutlined />} onClick={() => void load()}>Refresh</Button>
+      <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>New FAQ</Button>
+    </div>
+
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", minHeight: 42, marginBottom: 10 }}>
+      <Tag color="blue">{filteredRows.length} filtered</Tag>
+      {selectedRowKeys.length > 0 ? <>
+        <Tag color="purple">{selectedRowKeys.length} selected</Tag>
+        <Button size="small" onClick={selectAllFiltered} disabled={selectedRowKeys.length === filteredRows.length}>Select all {filteredRows.length} filtered</Button>
+        <Button size="small" onClick={() => setSelectedRowKeys([])}>Clear selection</Button>
+        <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={bulkBusy} onClick={() => void bulkSetStatus("published")}>Publish selected</Button>
+        <Button size="small" icon={<StopOutlined />} loading={bulkBusy} onClick={() => void bulkSetStatus("draft")}>Move to draft</Button>
+        <Popconfirm title={`Delete ${selectedRows.length} selected FAQ${selectedRows.length === 1 ? "" : "s"}?`} description="This action affects the current platform only." okText="Delete selected" okButtonProps={{ danger: true }} onConfirm={() => void bulkDelete()}>
+          <Button size="small" danger icon={<DeleteOutlined />} loading={bulkBusy}>Delete selected</Button>
+        </Popconfirm>
+      </> : <span style={{ color: "#8ea0bd" }}>Select FAQ rows to show bulk publish, draft and delete actions.</span>}
+    </div>
+
+    <Table
+      rowKey="id"
+      loading={loading}
+      dataSource={filteredRows}
+      columns={columns as any}
+      rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys, preserveSelectedRowKeys: true }}
+      pagination={{ defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], showTotal: (total) => `${total} FAQ${total === 1 ? "" : "s"}` }}
+      scroll={{ x: 1020 }}
+    />
+
     <Drawer open={!!editing} onClose={closeEditor} width="min(1180px, 96vw)" title={editing?.id ? `Edit FAQ — ${editing.question}` : "New FAQ"} extra={<Space><Button onClick={closeEditor}>Cancel</Button><Button type="primary" loading={saving} onClick={save}>Save</Button></Space>}>
       <Form form={form} layout="vertical">
         <Form.Item name="question" label="Question" rules={[{ required: true }]}><Input placeholder="How do I make a deposit?" /></Form.Item>
         <Space style={{ display: "flex", flexWrap: "wrap" }} align="start">
           <Form.Item name="locale" label="Locale" rules={[{ required: true }]} style={{ width: 250 }}><Select showSearch optionFilterProp="label" loading={loading && !localeOptions.length} options={localeOptions} placeholder="Choose a platform locale" /></Form.Item>
           <Form.Item name="topic" label="Topic (localized)" rules={[{ required: true, message: "Topic is required" }]} style={{ width: 260 }} extra="Use the same language as this FAQ locale."><Input maxLength={160} placeholder="General / Deposit / Withdrawal / Bank" /></Form.Item>
-          <Form.Item name="status" label="Status" style={{ width: 180 }}><Select options={["published", "draft", "archived"].map((v) => ({ value: v, label: v }))} /></Form.Item>
+          <Form.Item name="status" label="Status" style={{ width: 180 }}><Select options={["published", "draft", "archived"].map((value) => ({ value, label: value }))} /></Form.Item>
           <Form.Item name="priority" label="Priority"><InputNumber min={1} max={999} /></Form.Item>
         </Space>
         <Form.Item name="keywords" label="Search keywords and misspellings"><Input.TextArea rows={3} /></Form.Item>
         <Form.Item name="answer" hidden><Input /></Form.Item>
         <Form.Item label="FAQ answer — rich editor"><RichKnowledgeEditor value={answerJson} onChange={(json, html) => { setAnswerJson(json); setAnswerHtml(html); }} uploadImage={uploadImage} /></Form.Item>
-        <Space direction="vertical" style={{ width: "100%" }}><Space><Upload showUploadList={false} beforeUpload={addImage} accept="image/png,image/jpeg,image/webp,image/gif"><Button icon={<UploadOutlined />}>Upload FAQ image</Button></Upload><span style={{ color: "#8ea0bd" }}>{imageUrls.length} image(s)</span></Space>{imageUrls.map((url, index) => <Space key={url} style={{ width: "100%" }}><img src={url} alt={`FAQ ${index + 1}`} style={{ width: 72, height: 48, objectFit: "cover", borderRadius: 6 }} /><Input value={url} readOnly /><Button danger onClick={() => setImageUrls((all) => all.filter((_, i) => i !== index))}>Remove</Button></Space>)}</Space>
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <Space><Upload showUploadList={false} beforeUpload={addImage} accept="image/png,image/jpeg,image/webp,image/gif"><Button icon={<UploadOutlined />}>Upload FAQ image</Button></Upload><span style={{ color: "#8ea0bd" }}>{imageUrls.length} image(s)</span></Space>
+          {imageUrls.map((url, index) => <Space key={`${url}-${index}`} style={{ width: "100%" }}><img src={url} alt={`FAQ ${index + 1}`} style={{ width: 72, height: 48, objectFit: "cover", borderRadius: 6 }} /><Input value={url} readOnly /><Button danger onClick={() => setImageUrls((all) => all.filter((_, itemIndex) => itemIndex !== index))}>Remove</Button></Space>)}
+        </Space>
       </Form>
     </Drawer>
   </>;
