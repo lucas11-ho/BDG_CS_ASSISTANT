@@ -16,6 +16,11 @@ const IMAGE_TYPES = {
 };
 const pools = new Map();
 
+export async function closeBulkContentPools() {
+  await Promise.all([...pools.values()].map((pool) => pool.end().catch(() => undefined)));
+  pools.clear();
+}
+
 function text(value, max = 20000) {
   return String(value == null ? '' : value).replace(/\u00a0/g, ' ').trim().slice(0, max);
 }

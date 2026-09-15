@@ -6,7 +6,8 @@ export const Route = createFileRoute("/_admin/audit-logs")({
   component: () => (
     <DataPage
       resource="audit-logs"
-      createLabel="Audit entry"
+      readOnly
+      showStatusFilter={false}
       columns={[
         { title: "Time", dataIndex: "created_at", width: 190 },
         { title: "Admin", dataIndex: "actor_email", width: 220 },

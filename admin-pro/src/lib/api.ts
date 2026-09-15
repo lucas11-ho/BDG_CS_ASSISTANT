@@ -18,22 +18,40 @@ export const MOCK_MODE =
 const TOKEN_KEY = "admin_token";
 const USER_KEY = "admin_user";
 
+function storedValue(key: string) {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function clearStoredAuth() {
+  if (typeof window === "undefined") return;
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    try {
+      storage.removeItem(TOKEN_KEY);
+      storage.removeItem("bdg_token");
+      storage.removeItem(USER_KEY);
+    } catch {
+      // Authentication cleanup remains best effort if browser storage is blocked.
+    }
+  }
+}
+
 function getToken() {
-  if (typeof localStorage === "undefined") return "";
-  return localStorage.getItem(TOKEN_KEY) || localStorage.getItem("bdg_token") || "";
+  return storedValue(TOKEN_KEY) || storedValue("bdg_token");
 }
 
 export function logout() {
-  if (typeof localStorage === "undefined") return;
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem("bdg_token");
-  localStorage.removeItem(USER_KEY);
+  clearStoredAuth();
 }
 
 export function getCurrentUser() {
-  if (typeof localStorage === "undefined") return null;
   try {
-    return JSON.parse(localStorage.getItem(USER_KEY) || "null");
+    const stored = storedValue(USER_KEY);
+    return stored ? JSON.parse(stored) : null;
   } catch {
     return null;
   }
@@ -444,7 +462,7 @@ async function uploadSupportFile(file: File, path: string, caption = "") {
 }
 
 export const api = {
-  login: async (email: string, password: string, twofa_code?: string) => {
+  login: async (email: string, password: string, twofa_code?: string, remember = false) => {
     if (MOCK_MODE)
       return delay({ token: "mock-token", user: { email, name: "Admin", role: "owner" } });
     const res: any = await request(
@@ -456,9 +474,11 @@ export const api = {
     const token = res.access_token || res.token;
     if (!token) throw new Error("Login succeeded but no token was returned");
     const user = res.user || { email, name: email.split("@")[0], role: "admin" };
-    localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem("bdg_token", token);
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    clearStoredAuth();
+    const storage = remember ? window.localStorage : window.sessionStorage;
+    storage.setItem(TOKEN_KEY, token);
+    storage.setItem("bdg_token", token);
+    storage.setItem(USER_KEY, JSON.stringify(user));
     return { token, user };
   },
 
@@ -474,15 +494,21 @@ export const api = {
       api.list("audit-logs"),
       api.getSystemHealth(),
     ]);
-    const count = (x: PromiseSettledResult<any>) =>
-      x.status === "fulfilled" && Array.isArray(x.value) ? x.value.length : 0;
+    const unavailableResources: string[] = [];
+    const count = (name: string, result: PromiseSettledResult<unknown>) => {
+      if (result.status === "fulfilled" && Array.isArray(result.value)) return result.value.length;
+      unavailableResources.push(name);
+      return null;
+    };
+    if (audits.status !== "fulfilled" || !Array.isArray(audits.value)) unavailableResources.push("recent activity");
+    if (health.status !== "fulfilled") unavailableResources.push("system health");
     return {
-      totalGuides: count(guides),
-      totalFAQ: count(faqs),
-      totalCategories: count(categories),
-      aiContentItems: count(aiContent),
-      aiPromptSections: count(prompts),
-      chatSessions: count(sessions),
+      totalGuides: count("guides", guides),
+      totalFAQ: count("FAQ", faqs),
+      totalCategories: count("categories", categories),
+      aiContentItems: count("AI content", aiContent),
+      aiPromptSections: count("AI prompts", prompts),
+      chatSessions: count("chat sessions", sessions),
       deepSeekStatus:
         health.status === "fulfilled"
           ? health.value?.checks?.find((x: any) => x.name === "deepseek")?.status || "unknown"
@@ -495,6 +521,11 @@ export const api = {
         health.status === "fulfilled"
           ? health.value?.checks?.find((x: any) => x.name === "r2")?.status || "unknown"
           : "unavailable",
+      systemHealth:
+        health.status === "fulfilled"
+          ? health.value
+          : { ok: false, status: "unavailable", version: "unknown", checks: [], timestamp: "" },
+      unavailableResources: [...new Set(unavailableResources)],
       recentActivity: (audits.status === "fulfilled" && Array.isArray(audits.value)
         ? audits.value
         : []
@@ -502,9 +533,10 @@ export const api = {
         .slice(0, 6)
         .map((a: any) => ({
           id: a.id,
-          actor: a.actor || "system",
-          action: a.action || a.message || JSON.stringify(a).slice(0, 80),
-          time: a.created_at || a.time || "recently",
+          actor: a.actor_email || a.actor || "system",
+          action: a.action || a.message || "Activity",
+          details: a.details || "",
+          time: a.created_at || a.time || "",
         })),
     };
   },
@@ -684,11 +716,11 @@ export const api = {
     });
   },
 
-  resetAdmin2FA: async (id: string | number) => {
+  resetAdmin2FA: async (id: string | number, confirmation: string, owner_code = "") => {
     if (MOCK_MODE) return delay({ ok: true });
     return request(`/admin/admin-users/${id}/reset-2fa`, {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ confirmation, owner_code }),
     });
   },
 
