@@ -15,11 +15,13 @@ const publicRoot = read('../../guide-pro/src/routes/_public.tsx');
 for (const token of [
   'CREATE TABLE IF NOT EXISTS category_translations',
   'UNIQUE(category_id, locale)',
+  'CHECK (locale = lower(locale))',
+  "lower(replace(COALESCE(NULLIF(p.default_locale, ''), 'en'), '_', '-'))",
   'CREATE TABLE IF NOT EXISTS traffic_events',
   'CREATE TABLE IF NOT EXISTS traffic_presence',
   'PRIMARY KEY(platform_id, visitor_id)',
 ]) assert.ok(migration.includes(token), `missing migration contract: ${token}`);
-assert.ok(!/traffic_(?:events|presence)[\s\S]{0,600}\bip\b/i.test(migration), 'traffic analytics tables must not store raw IP');
+assert.ok(!/^\s*(?:ip|ip_address|remote_addr)\s+/mi.test(migration), 'traffic analytics tables must not define a raw IP column');
 
 for (const token of [
   'enrichCategoryListResponse',
