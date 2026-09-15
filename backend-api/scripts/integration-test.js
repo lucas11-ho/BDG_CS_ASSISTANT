@@ -259,6 +259,41 @@ try {
   }), 200, 'Owner force logout revokes the target account');
   expectStatus(await call('/admin/me', { platformRoute:'', authToken:secondaryToken }), 401, 'Revoked secondary token is rejected');
 
+  await database.query(`INSERT INTO saas_platform_memberships(platform_id,admin_user_id,role)
+    VALUES($1,$2,'platform_admin') ON CONFLICT(platform_id,admin_user_id) DO UPDATE SET role='platform_admin'`, [platform.id, createdAdmin.id]);
+  const restrictedAdmin = expectStatus(await call(`/admin/admin-users/${createdAdmin.id}`, {
+    method:'PUT', platformRoute:'', body:{ permissions:['dashboard.view','content.view'], twofa_required:true },
+  }), 200, 'Owner assigns exact permissions and requires 2FA');
+  assert.deepEqual(restrictedAdmin.permissions, ['content.view','dashboard.view']);
+  assert.equal(restrictedAdmin.twofa_required, true);
+  const requiredLogin = expectStatus(await call('/auth/login', {
+    method:'POST', auth:false, platformRoute:'', body:{ email:secondaryEmail, password:secondaryPassword },
+  }), 200, 'Required-2FA admin receives a limited enrollment session');
+  assert.equal(requiredLogin.twofa_setup_required, true);
+  const requiredToken = requiredLogin.access_token;
+  expectStatus(await call('/admin/me', { platformRoute:'', authToken:requiredToken }), 200, 'Enrollment session can read its own security profile');
+  const setupBlocked = expectStatus(await call('/admin/categories', { authToken:requiredToken }), 403, 'Enrollment session cannot access Admin data');
+  assert.equal(setupBlocked.code, 'TWOFA_SETUP_REQUIRED');
+  const setupResult = expectStatus(await call('/admin/me/2fa/setup', {
+    method:'POST', platformRoute:'', authToken:requiredToken, body:{},
+  }), 200, 'Restricted admin starts real authenticator enrollment');
+  const encryptedSecret = (await database.query('SELECT twofa_secret FROM admin_users WHERE id=$1', [createdAdmin.id])).rows[0]?.twofa_secret;
+  assert.match(String(encryptedSecret), /^enc\$v1\$/);
+  const enrollmentCode = await currentTotp(setupResult.secret);
+  expectStatus(await call('/admin/me/2fa/enable', {
+    method:'POST', platformRoute:'', authToken:requiredToken, body:{ code:enrollmentCode },
+  }), 200, 'Restricted admin verifies and enables authenticator 2FA');
+  expectStatus(await call('/admin/categories', { authToken:requiredToken }), 200, 'Explicit content view permission allows content reads after enrollment');
+  const deniedAi = expectStatus(await call('/admin/ai/settings', { platformRoute:'', authToken:requiredToken }), 403, 'Missing AI permission is rejected by the backend');
+  assert.equal(deniedAi.code, 'ADMIN_PERMISSION_DENIED');
+  expectStatus(await call(`/admin/admin-users/${createdAdmin.id}`, {
+    method:'PUT', platformRoute:'', body:{ permissions:['dashboard.view','content.view'], twofa_required:false },
+  }), 200, 'Owner makes target 2FA optional for replay verification');
+  const replayedCode = expectStatus(await call('/admin/me/2fa/disable', {
+    method:'POST', platformRoute:'', authToken:requiredToken, body:{ code:enrollmentCode },
+  }), 409, 'A consumed TOTP time-step cannot be replayed');
+  assert.equal(replayedCode.code, 'TWOFA_REPLAYED');
+
   const ownerSecret = 'JBSWY3DPEHPK3PXP';
   const targetSecret = 'KRUGS4ZANFZSAYJA';
   await database.query('UPDATE admin_users SET twofa_enabled=TRUE,twofa_secret=$1 WHERE lower(email)=lower($2)', [ownerSecret, env.ADMIN_EMAIL]);
@@ -276,9 +311,36 @@ try {
   expectStatus(await call(`/admin/admin-users/${createdAdmin.id}/reset-2fa`, {
     method:'POST', platformRoute:'', body:{ confirmation:secondaryEmail, owner_code:await currentTotp(ownerSecret) },
   }), 200, 'Owner reset 2FA clears protection and revokes target sessions');
+  const encryptedOwnerSecret = (await database.query('SELECT twofa_secret FROM admin_users WHERE lower(email)=lower($1)', [env.ADMIN_EMAIL])).rows[0]?.twofa_secret;
+  assert.match(String(encryptedOwnerSecret), /^enc\$v1\$/, 'A legacy plaintext TOTP secret must be encrypted after successful verification');
   const resetTarget = (await database.query('SELECT twofa_enabled,twofa_secret FROM admin_users WHERE id=$1', [createdAdmin.id])).rows[0];
   assert.equal(resetTarget.twofa_enabled, false);
   assert.equal(resetTarget.twofa_secret, null);
+  const lockEmail = 'locked-2fa-admin@example.test';
+  const lockPassword = 'Locked-2FA-Admin-Password-2026!';
+  const lockAdmin = expectStatus(await call('/admin/admin-users', {
+    method:'POST', platformRoute:'', body:{ name:'Lock Test Admin', email:lockEmail, password:lockPassword, permissions:['dashboard.view'] },
+  }), 200, 'Create 2FA lockout test administrator');
+  const lockLogin = expectStatus(await call('/auth/login', {
+    method:'POST', auth:false, platformRoute:'', body:{ email:lockEmail, password:lockPassword },
+  }), 200, 'Log in before enabling lockout test 2FA');
+  const lockSetup = expectStatus(await call('/admin/me/2fa/setup', {
+    method:'POST', platformRoute:'', authToken:lockLogin.access_token, body:{},
+  }), 200, 'Create lockout test authenticator secret');
+  const validLockCode = await currentTotp(lockSetup.secret);
+  expectStatus(await call('/admin/me/2fa/enable', {
+    method:'POST', platformRoute:'', authToken:lockLogin.access_token, body:{ code:validLockCode },
+  }), 200, 'Enable lockout test authenticator');
+  const invalidLockCode = String((Number(validLockCode) + 1) % 1_000_000).padStart(6, '0');
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const failedLogin = expectStatus(await call('/auth/login', {
+      method:'POST', auth:false, platformRoute:'', body:{ email:lockEmail, password:lockPassword, twofa_code:invalidLockCode },
+    }), attempt < 5 ? 401 : 429, `Reject invalid 2FA attempt ${attempt}`);
+    assert.equal(failedLogin.code, attempt < 5 ? 'TWOFA_INVALID' : 'TWOFA_LOCKED');
+  }
+  const lockedState = (await database.query('SELECT twofa_failed_attempts,twofa_locked_until FROM admin_users WHERE id=$1', [lockAdmin.id])).rows[0];
+  assert.equal(Number(lockedState.twofa_failed_attempts), 5);
+  assert.ok(new Date(lockedState.twofa_locked_until).getTime() > Date.now());
   const ownerAudit = expectStatus(await call('/admin/audit-logs'), 200, 'Owner reads scoped and owner-security audit events');
   assert.ok(ownerAudit.some((entry) => entry.action === 'reset_2fa' && entry.actor_email === env.ADMIN_EMAIL));
 
@@ -454,6 +516,7 @@ try {
   console.log(`PASS ${migrationFiles.length} immutable SQL migration files applied and rechecked`);
   console.log('PASS Real login, scoped CRUD, shared-host public read, hostname guard, and tenant-isolation paths');
   console.log('PASS Owner 2FA step-up, typed reset confirmation, force logout, session revocation, and security audit paths');
+  console.log('PASS Required 2FA enrollment, encrypted secrets, TOTP replay and lockout protection, and backend Admin permission checks');
   console.log('PASS Multilingual Guide import creates one stable parent, preserves two locales, and keeps rich body content on re-import');
   console.log('PASS Rich HTML is sanitized in the API response and PostgreSQL row');
   console.log('PASS Private connector targets are rejected through the authenticated API');

@@ -57,6 +57,23 @@ export function getCurrentUser() {
   }
 }
 
+export function setCurrentUser(user: any) {
+  if (typeof window === "undefined" || !user) return;
+  try {
+    const storage = window.localStorage.getItem(TOKEN_KEY) || window.localStorage.getItem("bdg_token")
+      ? window.localStorage
+      : window.sessionStorage;
+    storage.setItem(USER_KEY, JSON.stringify(user));
+  } catch {
+    // The live API remains authoritative if browser storage is unavailable.
+  }
+}
+
+export function hasAdminPermission(permission: string, user = getCurrentUser()) {
+  if (user?.role === "owner") return true;
+  return Array.isArray(user?.permissions) && user.permissions.includes(permission);
+}
+
 // A platform URL is the security context, not merely a visual route. Every
 // scoped admin request carries this route key so the API can enforce the
 // tenant/platform boundary on the server.
@@ -153,6 +170,11 @@ function normalizeResourcePayload(resource: string, payload: any): any[] {
       role: String(u.role || "admin").toLowerCase(),
       status: u.status || (u.is_active === false ? "inactive" : "active"),
       twofa_enabled: u.twofa_enabled === true,
+      twofa_required: u.twofa_required === true,
+      twofa_setup_required: u.twofa_setup_required === true,
+      permissions: Array.isArray(u.permissions) ? u.permissions : [],
+      permissions_configured: u.permissions_configured === true,
+      permission_catalog: Array.isArray(u.permission_catalog) ? u.permission_catalog : [],
       session_version: u.session_version || 0,
       lastLogin: u.lastLogin || u.last_login_at || "",
       created_at: u.created_at || "",
@@ -224,6 +246,8 @@ function normalizeForCreate(resource: string, data: any): any {
         : String(data.role || "admin").toLowerCase(),
       status: data.status || "active",
       is_active: data.status !== "inactive",
+      twofa_required: data.twofa_required === true,
+      permissions: Array.isArray(data.permissions) ? data.permissions : undefined,
     };
   }
   if (resource === "site-content") {

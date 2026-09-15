@@ -27,7 +27,7 @@ import {
 } from './faq-topics.js';
 
 const env = getRuntimeEnv();
-const API_VERSION = '1.19.1-admin-trust-security';
+const API_VERSION = '1.20.2-admin-2fa-permissions';
 const API_FEATURES = [
   'cs-workspace-shared-domain',
   'staff-self-profile-management',

@@ -67,7 +67,7 @@ await test('Runtime enriches FAQ responses so Guide grouping uses localized Topi
 
 await test('Production release marker advances to localized FAQ topics', async () => {
   const server = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
-  assert.ok(server.includes("const API_VERSION = '1.19.1-admin-trust-security'"));
+  assert.ok(server.includes("const API_VERSION = '1.20.2-admin-2fa-permissions'"));
   assert.ok(server.includes("'localized-faq-topics'"));
   assert.ok(server.includes("'faq-topic-excel-import-export'"));
 });
