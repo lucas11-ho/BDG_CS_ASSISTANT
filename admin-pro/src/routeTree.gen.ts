@@ -28,6 +28,7 @@ import { Route as AdminChatQuickRepliesRouteImport } from './routes/_admin.chat-
 import { Route as AdminChatLogsRouteImport } from './routes/_admin.chat-logs'
 import { Route as AdminCategoriesRouteImport } from './routes/_admin.categories'
 import { Route as AdminAuditLogsRouteImport } from './routes/_admin.audit-logs'
+import { Route as AdminAnalyticsRouteImport } from './routes/_admin.analytics'
 import { Route as AdminAiSourceRouterRouteImport } from './routes/_admin.ai-source-router'
 import { Route as AdminAiResponseQualityRouteImport } from './routes/_admin.ai-response-quality'
 import { Route as AdminAiReliabilityRouteImport } from './routes/_admin.ai-reliability'
@@ -135,6 +136,11 @@ const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
   path: '/audit-logs',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAnalyticsRoute = AdminAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminAiSourceRouterRoute = AdminAiSourceRouterRouteImport.update({
   id: '/ai-source-router',
   path: '/ai-source-router',
@@ -205,6 +211,7 @@ export interface FileRoutesByFullPath {
   '/ai-reliability': typeof AdminAiReliabilityRoute
   '/ai-response-quality': typeof AdminAiResponseQualityRoute
   '/ai-source-router': typeof AdminAiSourceRouterRoute
+  '/analytics': typeof AdminAnalyticsRoute
   '/audit-logs': typeof AdminAuditLogsRoute
   '/categories': typeof AdminCategoriesRoute
   '/chat-logs': typeof AdminChatLogsRoute
@@ -236,6 +243,7 @@ export interface FileRoutesByTo {
   '/ai-reliability': typeof AdminAiReliabilityRoute
   '/ai-response-quality': typeof AdminAiResponseQualityRoute
   '/ai-source-router': typeof AdminAiSourceRouterRoute
+  '/analytics': typeof AdminAnalyticsRoute
   '/audit-logs': typeof AdminAuditLogsRoute
   '/categories': typeof AdminCategoriesRoute
   '/chat-logs': typeof AdminChatLogsRoute
@@ -269,6 +277,7 @@ export interface FileRoutesById {
   '/_admin/ai-reliability': typeof AdminAiReliabilityRoute
   '/_admin/ai-response-quality': typeof AdminAiResponseQualityRoute
   '/_admin/ai-source-router': typeof AdminAiSourceRouterRoute
+  '/_admin/analytics': typeof AdminAnalyticsRoute
   '/_admin/audit-logs': typeof AdminAuditLogsRoute
   '/_admin/categories': typeof AdminCategoriesRoute
   '/_admin/chat-logs': typeof AdminChatLogsRoute
@@ -302,6 +311,7 @@ export interface FileRouteTypes {
     | '/ai-reliability'
     | '/ai-response-quality'
     | '/ai-source-router'
+    | '/analytics'
     | '/audit-logs'
     | '/categories'
     | '/chat-logs'
@@ -333,6 +343,7 @@ export interface FileRouteTypes {
     | '/ai-reliability'
     | '/ai-response-quality'
     | '/ai-source-router'
+    | '/analytics'
     | '/audit-logs'
     | '/categories'
     | '/chat-logs'
@@ -365,6 +376,7 @@ export interface FileRouteTypes {
     | '/_admin/ai-reliability'
     | '/_admin/ai-response-quality'
     | '/_admin/ai-source-router'
+    | '/_admin/analytics'
     | '/_admin/audit-logs'
     | '/_admin/categories'
     | '/_admin/chat-logs'
@@ -524,6 +536,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAuditLogsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/_admin/analytics': {
+      id: '/_admin/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof AdminAnalyticsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_admin/ai-source-router': {
       id: '/_admin/ai-source-router'
       path: '/ai-source-router'
@@ -616,6 +635,7 @@ interface AdminRouteChildren {
   AdminAiReliabilityRoute: typeof AdminAiReliabilityRoute
   AdminAiResponseQualityRoute: typeof AdminAiResponseQualityRoute
   AdminAiSourceRouterRoute: typeof AdminAiSourceRouterRoute
+  AdminAnalyticsRoute: typeof AdminAnalyticsRoute
   AdminAuditLogsRoute: typeof AdminAuditLogsRoute
   AdminCategoriesRoute: typeof AdminCategoriesRoute
   AdminChatLogsRoute: typeof AdminChatLogsRoute
@@ -646,6 +666,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminAiReliabilityRoute: AdminAiReliabilityRoute,
   AdminAiResponseQualityRoute: AdminAiResponseQualityRoute,
   AdminAiSourceRouterRoute: AdminAiSourceRouterRoute,
+  AdminAnalyticsRoute: AdminAnalyticsRoute,
   AdminAuditLogsRoute: AdminAuditLogsRoute,
   AdminCategoriesRoute: AdminCategoriesRoute,
   AdminChatLogsRoute: AdminChatLogsRoute,
