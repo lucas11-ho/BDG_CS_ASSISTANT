@@ -13,7 +13,23 @@ for (const template of ['professional', 'screenshot-focus', 'security-notice', '
 for (const localeFont of ['Noto Sans Myanmar', 'Noto Sans Devanagari', 'Noto Sans Thai', 'Noto Sans SC', 'Noto Sans Arabic']) {
   assert.ok(component.includes(localeFont), `missing multilingual font fallback ${localeFont}`);
 }
+assert.ok(component.includes('SF Pro Display'));
+assert.ok(component.includes('iOS / Apple System'));
 assert.ok(component.includes('isRtlLocale'));
+assert.ok(component.includes('Platform / cover logo'));
+assert.ok(component.includes('Upload custom logo'));
+assert.ok(component.includes('Logo shape'));
+assert.ok(component.includes('Alignment / position'));
+assert.ok(component.includes('Banner contains text'));
+assert.ok(component.includes('Banner font'));
+assert.ok(component.includes('Banner text'));
+assert.ok(component.includes('Save as platform default'));
+assert.ok(component.includes('Guide cover design presets'));
+assert.ok(component.includes('guide.cover.default_design.v2'));
+assert.ok(component.includes('guide.cover.design_presets.v2'));
+assert.ok(component.includes('api.getSettings()'));
+assert.ok(component.includes('api.update("site-content"'));
+assert.ok(component.includes('api.uploadGuide(file)'));
 assert.ok(component.includes('api.uploadGuideMotion(file)'));
 assert.ok(component.includes('Generate & use cover'));
 assert.ok(route.includes('GuideCoverStudio'));
@@ -22,4 +38,4 @@ assert.ok(route.includes('cover_media_type: \"image\", cover_image_url: url'));
 assert.ok(route.includes('Motion media cover / custom override'));
 assert.ok(publicApi.includes('tr?.cover_image_url || row?.cover_image_url'));
 
-console.log('Guide Cover Studio v1 regression contract passed.');
+console.log('Advanced Guide Cover Designer regression contract passed.');
