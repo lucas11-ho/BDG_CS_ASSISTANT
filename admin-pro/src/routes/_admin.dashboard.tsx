@@ -1,17 +1,21 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Card, Col, Empty, List, Row, Skeleton, Statistic, Tag } from "antd";
+import { Alert, Button, Card, Col, Empty, List, Row, Skeleton, Space, Statistic, Tag } from "antd";
 import {
   AppstoreOutlined,
   BookOutlined,
   CloudOutlined,
   DatabaseOutlined,
+  EyeOutlined,
+  GlobalOutlined,
   MessageOutlined,
   QuestionCircleOutlined,
   RobotOutlined,
+  TeamOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { api } from "@/lib/api";
+import { contentAnalyticsApi } from "@/lib/content-analytics-api";
 import { useAdminI18n } from "@/i18n/runtime";
 
 export const Route = createFileRoute("/_admin/dashboard")({
@@ -58,6 +62,7 @@ function StatCard({ icon, title, value, tone }: any) {
 function DashboardPage() {
   const { t } = useAdminI18n();
   const [data, setData] = useState<any>(null);
+  const [traffic, setTraffic] = useState<any>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -67,6 +72,16 @@ function DashboardPage() {
       .catch((reason: any) => { if (active) setError(reason?.message || t("Failed to load dashboard")); });
     return () => { active = false; };
   }, [t]);
+
+  useEffect(() => {
+    let active = true;
+    const load = () => contentAnalyticsApi.getTrafficAnalytics("7d")
+      .then((result) => { if (active) setTraffic(result); })
+      .catch(() => undefined);
+    void load();
+    const timer = window.setInterval(load, 10_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
 
   const checks = useMemo(
     () => new Map((data?.systemHealth?.checks || []).map((check: any) => [check.name, check])),
@@ -117,6 +132,21 @@ function DashboardPage() {
           </Col>
         ))}
       </Row>
+
+      <Card
+        className="bdg-card"
+        size="small"
+        style={{ marginTop: 12 }}
+        title={<Space><span style={{ color: "#22c55e" }}>●</span><span>Live Website Traffic</span><Tag color="green">LIVE</Tag></Space>}
+        extra={<Link to="/analytics"><Button size="small">Open analytics</Button></Link>}
+      >
+        <Row gutter={[12, 12]}>
+          <Col xs={12} md={6}><Statistic title="Active now" value={traffic?.active_now ?? "—"} prefix={<GlobalOutlined />} suffix={<span style={{ fontSize: 11, color: "#8ea0bd" }}>2 min</span>} /></Col>
+          <Col xs={12} md={6}><Statistic title="Visitors today" value={traffic?.visitors_today ?? "—"} prefix={<TeamOutlined />} /></Col>
+          <Col xs={12} md={6}><Statistic title="Page views today" value={traffic?.pageviews_today ?? "—"} prefix={<EyeOutlined />} /></Col>
+          <Col xs={12} md={6}><Statistic title="Visitors · 7 days" value={traffic?.visitors_7d ?? "—"} prefix={<GlobalOutlined />} /></Col>
+        </Row>
+      </Card>
 
       <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
         <Col xs={24} lg={16}>
