@@ -47,7 +47,7 @@
     "test:v1185-faq-topics": "node scripts/v1.18.5-localized-faq-topics-regression-test.js",
     "test:v1191-admin-trust": "node scripts/v1.19.1-admin-trust-security-regression-test.js && node scripts/v1.20.0-guide-cover-studio-regression-test.js",
     "test:v1200-cover-studio": "node scripts/v1.20.0-guide-cover-studio-regression-test.js",
-    "test:v1202-admin-security": "node scripts/v1.20.2-admin-2fa-permissions-regression-test.js",
+    "test:v1202-admin-security": "node scripts/v1.20.2-admin-2fa-permissions-regression-test.js && node scripts/v1.21.0-localized-categories-analytics-regression-test.js",
     "test:v1210-localized-analytics": "node scripts/v1.21.0-localized-categories-analytics-regression-test.js"
   },
   "dependencies": {
