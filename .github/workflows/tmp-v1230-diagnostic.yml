@@ -1,0 +1,31 @@
+name: Temporary v1.23.0 diagnostic
+
+on:
+  push:
+    branches:
+      - feature/v1.23.0-topics-security-control-center
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect core security and content integration points
+        run: |
+          echo '--- core permissions ---'
+          grep -n -B 12 -A 40 "permissionsForMembershipRole\|requirePlatformRoutePermission\|requireAdminRoutePermission" backend-api/src/core.js || true
+          echo '--- core admin users ---'
+          grep -n -B 20 -A 80 "admin-users\|reset-2fa\|/admin/me/2fa" backend-api/src/core.js | head -n 500 || true
+          echo '--- core guide faq routes ---'
+          grep -n -B 20 -A 80 "admin/guides\|admin/guide-images\|admin/faqs\|/guides\|/faqs" backend-api/src/core.js | head -n 800 || true
+          echo '--- membership queries ---'
+          grep -n -B 12 -A 45 "saas_platform_memberships" backend-api/src/core.js | head -n 700 || true
+          echo '--- Admin nav ---'
+          grep -n -B 15 -A 80 "Admin Users\|admin-users\|permissionForNav\|navigation" admin-pro/src/components/AdminLayout.tsx | head -n 500 || true
+          echo '--- API security methods ---'
+          grep -n -B 10 -A 50 "resetAdmin2FA\|setup2FA\|enable2FA\|disable2FA\|listGuideTranslations" admin-pro/src/lib/api.ts | head -n 500 || true
+          echo '--- guide editor save fields ---'
+          grep -n -B 20 -A 100 "category_id\|Save locale\|api.update(\"guide-images\"" admin-pro/src/routes/_admin.guide-images.tsx | head -n 700 || true
