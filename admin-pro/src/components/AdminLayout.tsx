@@ -33,13 +33,14 @@ import {
   ApartmentOutlined,
   SwapOutlined,
   BarChartOutlined,
+  SafetyCertificateOutlined,
 } from "@ant-design/icons";
 import { Link, useLocation, useNavigate, useMatches } from "@tanstack/react-router";
 import { api, getActiveAdminPlatformRoute, getCurrentUser, logout, setCurrentUser } from "@/lib/api";
 import AccountSecurityDrawer from "@/components/AccountSecurityDrawer";
 
 const { Sider, Header, Content } = Layout;
-const ADMIN_VERSION = "v1.22.1";
+const ADMIN_VERSION = "v1.23.0";
 
 const NAV: { key: string; to: string; label: string; icon: ReactNode; group?: string }[] = [
   {
@@ -177,6 +178,7 @@ const NAV: { key: string; to: string; label: string; icon: ReactNode; group?: st
     icon: <TeamOutlined />,
     group: "SETTINGS",
   },
+  { key: "/security-permissions", to: "/security-permissions", label: "Security & Permissions", icon: <SafetyCertificateOutlined />, group: "SETTINGS" },
 ];
 
 const ZH: Record<string, string> = {
@@ -200,6 +202,7 @@ const ZH: Record<string, string> = {
   APPEARANCE: "外观", ENGAGEMENT: "互动",
   "Audit Logs": "审计日志",
   "Admin Users": "管理员账号",
+  "Security & Permissions": "安全与权限",
   "Platform Control Center": "平台控制中心",
   "Domain Mapping": "域名映射",
   "Platform Transfer": "平台迁移",
@@ -216,7 +219,7 @@ const ZH: Record<string, string> = {
   "My Profile": "我的资料",
 };
 const MY: Record<string, string> = {
-  Dashboard: "ဒက်ရှ်ဘုတ်", "Traffic Analytics": "ဝဘ်အသုံးပြုမှု ခွဲခြမ်းစိတ်ဖြာမှု", ANALYTICS: "ခွဲခြမ်းစိတ်ဖြာမှု", "Platform Control Center": "ပလက်ဖောင်းထိန်းချုပ်မှု", "Domain Mapping": "ဒိုမိန်းချိတ်ဆက်မှု", "Platform Transfer": "ပလက်ဖောင်း ဒေတာကူးပြောင်းမှု", "Site Content": "ဆိုက်အကြောင်းအရာ", Categories: "အမျိုးအစားများ", Guide: "လမ်းညွှန်", FAQ: "အမေးများ", "Assistant Setup": "AI Assistant ပြင်ဆင်မှု", "AI Knowledge": "AI အသိပညာ", "Customer Service": "ဖောက်သည်ဝန်ဆောင်မှု", "CUSTOMER SERVICE": "ဖောက်သည်ဝန်ဆောင်မှု", "Menu & Images": "မီနူးနှင့် ပုံများ", "AI Knowledge Import": "AI အသိပညာ တင်သွင်းရန်", "AI Q&A": "AI အမေးအဖြေ", "AI Source Router": "AI ရင်းမြစ် လမ်းကြောင်း", "AI Reliability": "AI ယုံကြည်စိတ်ချရမှု", "AI Response Quality": "AI တုံ့ပြန်မှုအရည်အသွေး", "Prompt Version History": "Prompt ဗားရှင်းမှတ်တမ်း", "Global Buttons": "Global Buttons", "Guide Theme": "Guide Theme", "Chat Theme": "Chat Theme", "Test & Diagnostics": "စမ်းသပ်ခြင်းနှင့် စစ်ဆေးမှု", "Chat Quick Replies": "Chat အမြန်ဖြေ", "Chat Logs": "Chat မှတ်တမ်း", "Unmatched Questions": "မကိုက်ညီသောမေးခွန်းများ", APPEARANCE: "Appearance", ENGAGEMENT: "Engagement", "Audit Logs": "စစ်ဆေးမှတ်တမ်း", "Admin Users": "စီမံသူများ", PLATFORM: "ပလက်ဖောင်း", OVERVIEW: "အနှစ်ချုပ်", CONTENT: "အကြောင်းအရာ", AI: "AI", CHAT: "Chat", SETTINGS: "ဆက်တင်များ", Console: "ကွန်ဆိုလ်", "Sign out": "ထွက်ရန်", "My Profile": "ကိုယ်ရေးအချက်အလက်"
+  Dashboard: "ဒက်ရှ်ဘုတ်", "Traffic Analytics": "ဝဘ်အသုံးပြုမှု ခွဲခြမ်းစိတ်ဖြာမှု", ANALYTICS: "ခွဲခြမ်းစိတ်ဖြာမှု", "Platform Control Center": "ပလက်ဖောင်းထိန်းချုပ်မှု", "Domain Mapping": "ဒိုမိန်းချိတ်ဆက်မှု", "Platform Transfer": "ပလက်ဖောင်း ဒေတာကူးပြောင်းမှု", "Site Content": "ဆိုက်အကြောင်းအရာ", Categories: "အမျိုးအစားများ", Guide: "လမ်းညွှန်", FAQ: "အမေးများ", "Assistant Setup": "AI Assistant ပြင်ဆင်မှု", "AI Knowledge": "AI အသိပညာ", "Customer Service": "ဖောက်သည်ဝန်ဆောင်မှု", "CUSTOMER SERVICE": "ဖောက်သည်ဝန်ဆောင်မှု", "Menu & Images": "မီနူးနှင့် ပုံများ", "AI Knowledge Import": "AI အသိပညာ တင်သွင်းရန်", "AI Q&A": "AI အမေးအဖြေ", "AI Source Router": "AI ရင်းမြစ် လမ်းကြောင်း", "AI Reliability": "AI ယုံကြည်စိတ်ချရမှု", "AI Response Quality": "AI တုံ့ပြန်မှုအရည်အသွေး", "Prompt Version History": "Prompt ဗားရှင်းမှတ်တမ်း", "Global Buttons": "Global Buttons", "Guide Theme": "Guide Theme", "Chat Theme": "Chat Theme", "Test & Diagnostics": "စမ်းသပ်ခြင်းနှင့် စစ်ဆေးမှု", "Chat Quick Replies": "Chat အမြန်ဖြေ", "Chat Logs": "Chat မှတ်တမ်း", "Unmatched Questions": "မကိုက်ညီသောမေးခွန်းများ", APPEARANCE: "Appearance", ENGAGEMENT: "Engagement", "Audit Logs": "စစ်ဆေးမှတ်တမ်း", "Admin Users": "စီမံသူများ", "Security & Permissions": "လုံခြုံရေးနှင့် ခွင့်ပြုချက်များ", PLATFORM: "ပလက်ဖောင်း", OVERVIEW: "အနှစ်ချုပ်", CONTENT: "အကြောင်းအရာ", AI: "AI", CHAT: "Chat", SETTINGS: "ဆက်တင်များ", Console: "ကွန်ဆိုလ်", "Sign out": "ထွက်ရန်", "My Profile": "ကိုယ်ရေးအချက်အလက်"
 };
 function langNow() {
   try {
@@ -233,7 +236,7 @@ function tr(v?: string) {
 
 function permissionForNav(item: (typeof NAV)[number]) {
   if (item.key === "/platform-transfer") return "platform.transfer.import";
-  if (item.key === "/admin-users") return "platform.manage";
+  if (item.key === "/admin-users" || item.key === "/security-permissions") return "platform.manage";
   if (item.key === "/analytics") return "dashboard.view";
   if (item.key === "/audit-logs") return "audit.view";
   if (item.group === "PLATFORM") return "platform.view";
@@ -249,7 +252,7 @@ function buildMenu(userRole?: string, permissions: string[] = [], canManagePlatf
   const groups = new Map<string, typeof NAV>();
   for (const item of NAV) {
     if (item.key === "/platform-transfer" && !getActiveAdminPlatformRoute()) continue;
-    if (item.key === "/admin-users" && userRole !== "owner" && !(getActiveAdminPlatformRoute() && canManagePlatform)) continue;
+    if ((item.key === "/admin-users" || item.key === "/security-permissions") && userRole !== "owner" && !(getActiveAdminPlatformRoute() && canManagePlatform)) continue;
     if (userRole !== "owner" && !permissions.includes(permissionForNav(item))) continue;
     const g = item.group || "";
     if (!groups.has(g)) groups.set(g, []);
@@ -296,7 +299,7 @@ export default function AdminLayout({
   useEffect(() => {
     if (!getActiveAdminPlatformRoute()) { setPlatformContext(null); return; }
     let alive = true;
-    api.getPlatformContext().then((value) => { if (alive) setPlatformContext(value); }).catch(() => { if (alive) setPlatformContext(null); });
+    api.getPlatformContext().then((value: any) => { if (alive) { setPlatformContext(value); if (value?.access?.twofa_setup_required === true) setSecurityOpen(true); } }).catch(() => { if (alive) setPlatformContext(null); });
     return () => { alive = false; };
   }, [location.pathname]);
 

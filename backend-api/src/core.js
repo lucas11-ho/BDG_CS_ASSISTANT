@@ -48,7 +48,7 @@ const { Pool } = pg;
 const scryptAsync = promisify(scryptCallback);
 const pools = new Map();
 
-const VERSION = '1.22.1-stability-performance';
+const VERSION = '1.23.0-topics-security-control';
 
 const ADMIN_PERMISSION_CATALOG = Object.freeze([
   'dashboard.view',
@@ -199,6 +199,7 @@ async function route(request, env, url) {
   if (method === 'POST' && path === '/admin/me/2fa/setup') return json(await setupOwn2fa(env, admin), 200, env);
   if (method === 'POST' && path === '/admin/me/2fa/enable') return json(await enableOwn2fa(env, admin, await readJson(request)), 200, env);
   if (method === 'POST' && path === '/admin/me/2fa/disable') return json(await disableOwn2fa(env, admin, await readJson(request)), 200, env);
+  if (method === 'POST' && path === '/admin/me/2fa/verify') return json(await verifyOwn2fa(env, admin, await readJson(request)), 200, env);
   if (method === 'GET' && path === '/admin/sessions') return json(await listAdminSessions(env, admin), 200, env);
   if (method === 'GET' && path === '/admin/platform-context') return json(await getAdminPlatformContext(env, request, admin), 200, env);
 
@@ -248,6 +249,7 @@ async function route(request, env, url) {
   // their generated /p/<route-key>/admin URL.
   const scope = requiresPlatformScope(path) ? await resolveAdminPlatformScope(env, request, admin) : null;
   if (scope) scope.actor_email = admin?.email || '';
+  if (scope?.twofa_setup_required) bad('Two-factor authentication setup is required for this platform', 403, 'TWOFA_SETUP_REQUIRED');
   if (scope) requirePlatformRoutePermission(scope, method, path);
 
   if (scope && path.startsWith('/admin/platform-transfers')) {
@@ -481,6 +483,8 @@ async function route(request, env, url) {
   if (method === 'POST' && path === '/admin/platform-admin-users') return json(await createCurrentPlatformAdmin(env, admin, await readJson(request), scope), 200, env);
   if (method === 'PUT' && /^\/admin\/platform-admin-users\/\d+$/.test(path)) return json(await updateCurrentPlatformAdmin(env, admin, idFromPath(path), await readJson(request), scope), 200, env);
   if (method === 'POST' && /^\/admin\/platform-admin-users\/\d+\/password$/.test(path)) return json(await changeCurrentPlatformAdminPassword(env, admin, idFromParts(path, 3), await readJson(request), scope), 200, env);
+  if (method === 'POST' && /^\/admin\/platform-admin-users\/\d+\/force-logout$/.test(path)) return json(await forceLogoutCurrentPlatformAdmin(env, admin, idFromParts(path, 3), scope), 200, env);
+  if (method === 'POST' && /^\/admin\/platform-admin-users\/\d+\/reset-2fa$/.test(path)) return json(await resetCurrentPlatformAdmin2fa(env, admin, idFromParts(path, 3), scope), 200, env);
   if (method === 'DELETE' && /^\/admin\/platform-admin-users\/\d+$/.test(path)) return json(await removeCurrentPlatformAdmin(env, admin, idFromPath(path), scope), 200, env);
 
   // AI mode
@@ -1561,7 +1565,7 @@ async function listGuides(env, params = new URLSearchParams()) {
   const lang = params.get?.('language') || params.get?.('lang') || scope.default_locale || 'en';
   let sql = `SELECT g.*, c.name AS category_name, c.icon AS category_icon, c.slug AS category_slug FROM guides g LEFT JOIN categories c ON c.id=g.category_id WHERE g.status='published' AND g.tenant_id=$1 AND g.platform_id=$2`;
   const vals = [scope.tenant_id, scope.platform_id]; const category = params.get?.('category');
-  if (category) { vals.push(category); sql += ` AND c.slug=$${vals.length}`; }
+  if (category) { vals.push(category); sql += ` AND (c.slug=$${vals.length} OR EXISTS (SELECT 1 FROM guide_topics gt JOIN categories tc ON tc.id=gt.category_id WHERE gt.guide_id=g.id AND gt.tenant_id=g.tenant_id AND gt.platform_id=g.platform_id AND tc.slug=$${vals.length}))`; }
   sql += ' ORDER BY g.priority ASC, g.updated_at DESC, g.id DESC';
   const rows = (await q(env, sql, vals)).rows;
   const translated = [];
@@ -2195,7 +2199,19 @@ function platformDomainOut(row) {
   return { id: Number(row.id), platform_id: Number(row.platform_id), site_kind: row.site_kind, hostname: row.hostname, public_url: `https://${row.hostname}`, custom_url: row.site_kind === 'staff' ? `https://${row.hostname}` : (route ? `https://${row.hostname}/p/${route}` : `https://${row.hostname}`), provisioning_status: row.provisioning_status || 'planned', verification_note: row.verification_note || '', created_at: row.created_at ? String(row.created_at) : '', updated_at: row.updated_at ? String(row.updated_at) : '', verified_at: row.verified_at ? String(row.verified_at) : '', cloudflare_hostname_id: row.cloudflare_hostname_id || '', cloudflare_zone_id: row.cloudflare_zone_id || '', cloudflare_status: row.cloudflare_status || '', cloudflare_ssl_status: row.cloudflare_ssl_status || '', cloudflare_origin_server: row.cloudflare_origin_server || '', cloudflare_cname_target: row.cloudflare_cname_target || '', validation_method: row.validation_method || 'txt', ownership_verification: ownership, ssl_validation_records: sslRecords, cloudflare_last_synced_at: row.cloudflare_last_synced_at ? String(row.cloudflare_last_synced_at) : '', cloudflare_last_error: row.cloudflare_last_error || '', cors_allowed: corsAllowed, cors_effective: corsEffective, cors_status: !corsAllowed ? 'disabled' : (corsEffective ? 'trusted' : 'waiting_for_verified_ssl'), cors_activated_at: row.cors_activated_at ? String(row.cors_activated_at) : '' };
 }
 function platformMemberOut(row) {
-  return { id: Number(row.id), platform_id: Number(row.platform_id), admin_user_id: Number(row.admin_user_id), name: row.name || '', email: row.email || '', role: row.role || 'viewer', is_active: row.is_active !== false, created_at: row.created_at ? String(row.created_at) : '' };
+  const role = row.role || 'viewer';
+  const owner = role === 'platform_owner';
+  const explicit = parseAdminPermissions(row.permissions_json);
+  const permissions = owner ? [...ADMIN_PERMISSION_CATALOG] : (explicit || permissionsForMembershipRole(role));
+  return {
+    id:Number(row.id), platform_id:Number(row.platform_id), admin_user_id:Number(row.admin_user_id),
+    name:row.name || '', email:row.email || '', role, is_active:row.is_active !== false,
+    twofa_enabled:row.twofa_enabled === true,
+    require_2fa:row.require_2fa === true,
+    twofa_required:row.require_2fa === true || row.twofa_required === true,
+    permissions, permission_catalog:[...ADMIN_PERMISSION_CATALOG], permissions_configured:owner || row.permissions_json != null,
+    created_at:row.created_at ? String(row.created_at) : '',
+  };
 }
 function platformFeatureOut(row) {
   let configuration = {};
@@ -2366,7 +2382,7 @@ async function resolveAdminPlatformScope(env, request, admin) {
   const tenantMembership = (await q(env, `SELECT tm.role AS membership_role FROM saas_tenant_memberships tm
     JOIN admin_users u ON u.id=tm.admin_user_id
     WHERE tm.tenant_id=$1 AND lower(u.email)=lower($2) LIMIT 1`, [scope.tenant_id, admin.email])).rows[0];
-  const platformMembership = (await q(env, `SELECT pm.role AS membership_role FROM saas_platform_memberships pm
+  const platformMembership = (await q(env, `SELECT pm.role AS membership_role,pm.permissions_json,pm.require_2fa FROM saas_platform_memberships pm
     JOIN admin_users u ON u.id=pm.admin_user_id
     WHERE pm.platform_id=$1 AND lower(u.email)=lower($2) LIMIT 1`, [scope.platform_id, admin.email])).rows[0];
   const tenantRole = String(tenantMembership?.membership_role || '');
@@ -2377,21 +2393,24 @@ async function resolveAdminPlatformScope(env, request, admin) {
     ...permissionsForMembershipRole(tenantRole),
     ...permissionsForMembershipRole(platformRole),
   ])];
-  const explicitPermissions = admin.permissions == null ? null : new Set(admin.permissions);
-  let permissions = explicitPermissions == null
+  const membershipPermissions = parseAdminPermissions(platformMembership?.permissions_json);
+  const legacyGlobalPermissions = admin.permissions == null ? null : new Set(admin.permissions);
+  const explicitPermissions = membershipPermissions == null ? legacyGlobalPermissions : new Set(membershipPermissions);
+  let permissions = ['tenant_owner','platform_owner'].includes(accessRole)
     ? rolePermissions
-    : rolePermissions.filter(permission => explicitPermissions.has(permission));
+    : (explicitPermissions == null ? rolePermissions : rolePermissions.filter(permission => explicitPermissions.has(permission)));
   if (['tenant_owner','platform_owner'].includes(accessRole) && (explicitPermissions == null || explicitPermissions.has('platform.manage'))) {
     permissions = [...new Set([...permissions,...PLATFORM_TRANSFER_PERMISSIONS])];
   }
   const canManagePlatform = permissions.includes('platform.manage');
   const canWrite = permissions.some(permission => permission.endsWith('.manage'));
   const canUploadGuides = permissions.includes('content.manage');
-  return { ...scope, tenant_role:tenantRole, platform_role:platformRole, access_role:accessRole, permissions, can_write:canWrite, can_manage_platform:canManagePlatform, can_upload_guides:canUploadGuides, can_publish_guides:canUploadGuides, operator:false };
+  const membershipTwofaRequired = platformMembership?.require_2fa === true || admin.twofa_required === true;
+  return { ...scope, tenant_role:tenantRole, platform_role:platformRole, access_role:accessRole, permissions, can_write:canWrite, can_manage_platform:canManagePlatform, can_upload_guides:canUploadGuides, can_publish_guides:canUploadGuides, twofa_required:membershipTwofaRequired, twofa_setup_required:membershipTwofaRequired && admin.twofa_enabled !== true, operator:false };
 }
 async function getAdminPlatformContext(env, request, admin) {
   const scope = await resolveAdminPlatformScope(env, request, admin);
-  return { ok:true, version:VERSION, platform:scope, platform_resolution:platformResolutionDiagnostics(scope, scope.platform_context), access: { role:scope.access_role, permissions:scope.permissions, can_write:scope.can_write, can_manage_platform:scope.can_manage_platform, can_upload_guides:scope.can_upload_guides, can_publish_guides:scope.can_publish_guides } };
+  return { ok:true, version:VERSION, platform:scope, platform_resolution:platformResolutionDiagnostics(scope, scope.platform_context), access: { role:scope.access_role, permissions:scope.permissions, can_write:scope.can_write, can_manage_platform:scope.can_manage_platform, can_upload_guides:scope.can_upload_guides, can_publish_guides:scope.can_publish_guides, twofa_required:scope.twofa_required === true, twofa_setup_required:scope.twofa_setup_required === true } };
 }
 function permissionsForMembershipRole(role) {
   if (['tenant_owner','platform_owner'].includes(role)) return [...ADMIN_PERMISSION_CATALOG];
@@ -4108,7 +4127,7 @@ async function getTenantPlatform(env, admin, id) {
   if (!row) bad('Platform not found', 404);
   const [domains, members, features] = await Promise.all([
     q(env, `SELECT * FROM saas_platform_domains WHERE platform_id=$1 AND archived_at IS NULL ORDER BY site_kind`, [id]),
-    q(env, `SELECT pm.*,u.name,u.email,u.is_active FROM saas_platform_memberships pm JOIN admin_users u ON u.id=pm.admin_user_id WHERE pm.platform_id=$1 ORDER BY CASE WHEN pm.role='platform_owner' THEN 0 ELSE 1 END,u.email`, [id]),
+    q(env, `SELECT pm.*,u.name,u.email,u.is_active,u.twofa_enabled,u.twofa_required FROM saas_platform_memberships pm JOIN admin_users u ON u.id=pm.admin_user_id WHERE pm.platform_id=$1 ORDER BY CASE WHEN pm.role='platform_owner' THEN 0 ELSE 1 END,u.email`, [id]),
     q(env, `SELECT * FROM saas_platform_features WHERE platform_id=$1 ORDER BY feature_key`, [id]),
   ]);
   return { ...tenantPlatformOut(row), domains: domains.rows.map(platformDomainOut), members: members.rows.map(platformMemberOut), features: features.rows.map(platformFeatureOut) };
@@ -4212,7 +4231,7 @@ async function deletePlatformDomain(env, admin, id) {
 }
 async function listPlatformMembers(env, admin, platformId) {
   await assertPlatformManager(env, admin, platformId);
-  const { rows } = await q(env, `SELECT pm.*,u.name,u.email,u.is_active FROM saas_platform_memberships pm JOIN admin_users u ON u.id=pm.admin_user_id WHERE pm.platform_id=$1 ORDER BY CASE WHEN pm.role='platform_owner' THEN 0 ELSE 1 END,u.email`, [platformId]);
+  const { rows } = await q(env, `SELECT pm.*,u.name,u.email,u.is_active,u.twofa_enabled,u.twofa_required FROM saas_platform_memberships pm JOIN admin_users u ON u.id=pm.admin_user_id WHERE pm.platform_id=$1 ORDER BY CASE WHEN pm.role='platform_owner' THEN 0 ELSE 1 END,u.email`, [platformId]);
   return rows.map(platformMemberOut);
 }
 async function createPlatformMember(env, admin, platformId, payload = {}) {
@@ -4257,17 +4276,40 @@ async function createCurrentPlatformAdmin(env, admin, payload, scope) {
 }
 async function updateCurrentPlatformAdmin(env, admin, membershipId, payload, scope) {
   if (!scope?.can_manage_platform) bad('Platform owner permission required', 403, 'PLATFORM_ADMIN_REQUIRED');
-  const current = (await q(env, `SELECT pm.*,u.name,u.email,u.is_active FROM saas_platform_memberships pm JOIN admin_users u ON u.id=pm.admin_user_id WHERE pm.id=$1 AND pm.platform_id=$2`, [membershipId,scope.platform_id])).rows[0];
+  const current = (await q(env, `SELECT pm.*,u.name,u.email,u.is_active,u.twofa_enabled,u.twofa_required FROM saas_platform_memberships pm JOIN admin_users u ON u.id=pm.admin_user_id WHERE pm.id=$1 AND pm.platform_id=$2`, [membershipId,scope.platform_id])).rows[0];
   if (!current) bad('Platform admin user not found', 404);
   const role = PLATFORM_ROLES.has(String(payload.role || current.role).toLowerCase()) ? String(payload.role || current.role).toLowerCase() : current.role;
   if (current.role === 'platform_owner' && role !== 'platform_owner') {
     const owners = (await q(env, `SELECT COUNT(*)::int AS count FROM saas_platform_memberships WHERE platform_id=$1 AND role='platform_owner'`, [scope.platform_id])).rows[0];
     if (Number(owners?.count || 0) <= 1) bad('Assign another platform owner before changing the final owner role');
   }
+  if (String(current.email || '').toLowerCase() === String(admin.email || '').toLowerCase() && role !== current.role) bad('You cannot change your own platform role', 409, 'SELF_ROLE_CHANGE_DENIED');
   const user = (await q(env, `UPDATE admin_users SET name=$1,is_active=$2,updated_at=NOW() WHERE id=$3 RETURNING *`, [String(payload.name || current.name || current.email).slice(0,160), payload.status ? payload.status !== 'inactive' : payload.is_active !== false, current.admin_user_id])).rows[0];
-  const member = (await q(env, `UPDATE saas_platform_memberships SET role=$1,updated_at=NOW() WHERE id=$2 AND platform_id=$3 RETURNING *`, [role,membershipId,scope.platform_id])).rows[0];
+  const requestedPermissions = role === 'platform_owner' ? null : (Object.prototype.hasOwnProperty.call(payload, 'permissions') ? validatedAdminPermissions(payload.permissions) : parseAdminPermissions(current.permissions_json));
+  const require2fa = Object.prototype.hasOwnProperty.call(payload, 'require_2fa') ? payload.require_2fa === true : current.require_2fa === true;
+  const member = (await q(env, `UPDATE saas_platform_memberships SET role=$1,permissions_json=$2,require_2fa=$3,updated_at=NOW() WHERE id=$4 AND platform_id=$5 RETURNING *`, [role,requestedPermissions == null ? null : JSON.stringify(requestedPermissions),require2fa,membershipId,scope.platform_id])).rows[0];
   await audit(env, 'update', 'platform_admin_user', membershipId, `Platform user ${user.email} updated`, scope);
   return platformMemberOut({ ...member, name:user.name, email:user.email, is_active:user.is_active });
+}
+async function platformMembershipTarget(env, membershipId, scope) {
+  const row = (await q(env, `SELECT pm.*,u.email,u.role AS global_role FROM saas_platform_memberships pm JOIN admin_users u ON u.id=pm.admin_user_id WHERE pm.id=$1 AND pm.platform_id=$2 LIMIT 1`, [membershipId,scope.platform_id])).rows[0];
+  if (!row) bad('Platform administrator not found', 404, 'PLATFORM_ADMIN_NOT_FOUND');
+  return row;
+}
+async function forceLogoutCurrentPlatformAdmin(env, admin, membershipId, scope) {
+  if (!scope?.can_manage_platform) bad('Platform owner permission required', 403, 'PLATFORM_ADMIN_REQUIRED');
+  const target = await platformMembershipTarget(env, membershipId, scope);
+  await q(env, 'UPDATE admin_users SET session_version=COALESCE(session_version,0)+1,updated_at=NOW() WHERE id=$1', [target.admin_user_id]);
+  await audit(env, 'security', 'platform_admin_user', membershipId, `All Admin sessions revoked for ${target.email}`, scope);
+  return { ok:true, membership_id:Number(membershipId) };
+}
+async function resetCurrentPlatformAdmin2fa(env, admin, membershipId, scope) {
+  if (!scope?.can_manage_platform) bad('Platform owner permission required', 403, 'PLATFORM_ADMIN_REQUIRED');
+  const target = await platformMembershipTarget(env, membershipId, scope);
+  if (String(target.email || '').toLowerCase() === String(admin.email || '').toLowerCase()) bad('Use Account & Security to change your own 2FA', 409, 'SELF_2FA_RESET_DENIED');
+  await q(env, `UPDATE admin_users SET twofa_enabled=FALSE,twofa_secret=NULL,twofa_last_counter=NULL,twofa_failed_attempts=0,twofa_locked_until=NULL,session_version=COALESCE(session_version,0)+1,updated_at=NOW() WHERE id=$1`, [target.admin_user_id]);
+  await audit(env, 'security', 'platform_admin_user', membershipId, `2FA reset for ${target.email}`, scope);
+  return { ok:true, membership_id:Number(membershipId), twofa_enabled:false };
 }
 async function changeCurrentPlatformAdminPassword(env, admin, membershipId, payload, scope) {
   if (!scope?.can_manage_platform) bad('Platform owner permission required', 403, 'PLATFORM_ADMIN_REQUIRED');
@@ -6703,6 +6745,18 @@ async function disableOwn2fa(env, admin, p = {}) {
   await q(env, 'UPDATE admin_users SET twofa_enabled=FALSE,twofa_secret=NULL,twofa_last_counter=NULL,twofa_failed_attempts=0,twofa_locked_until=NULL,updated_at=NOW() WHERE id=$1', [row.id]);
   await securityAudit(env, admin, '2fa_disabled', row.id, '2FA disabled');
   return { ok: true };
+}
+async function verifyOwn2fa(env, admin, p = {}) {
+  const row = (await q(env, 'SELECT id,email,twofa_enabled,twofa_secret,twofa_last_counter,twofa_failed_attempts,twofa_locked_until FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
+  if (!row) bad('Admin not found', 404, 'ADMIN_NOT_FOUND');
+  if (row.twofa_enabled !== true || !row.twofa_secret) bad('Enable two-factor authentication before testing a code', 409, 'TWOFA_NOT_ENABLED');
+  const code = String(p.code || p.twofa_code || p.otp || '').trim();
+  if (!/^\d{6}$/.test(code)) bad('Enter a valid 6-digit code', 400, 'TWOFA_CODE_INVALID');
+  await verifyAndConsumeAdminTotp(env, row, code, { invalidStatus:400 });
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const nextCodeInSeconds = Math.max(1, 30 - (nowSeconds % 30));
+  await securityAudit(env, admin, '2fa_self_verified', row.id, 'Administrator verified their current 2FA code');
+  return { ok:true, verified:true, code_consumed:true, verified_at:new Date().toISOString(), next_code_in_seconds:nextCodeInSeconds };
 }
 async function changeOwnPassword(env, admin, p = {}) {
   const password = p.password || p.new_password;

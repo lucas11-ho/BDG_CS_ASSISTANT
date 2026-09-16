@@ -203,7 +203,7 @@ function VisualGuideStudio() {
     setEditing(row || { title: "", slug: "", status: "draft", priority: 100, button_ids: [] });
     const selected = locales.find((locale) => locale.is_default)?.code || locales[0]?.code || "en";
     setActiveLocale(selected);
-    form.setFieldsValue(row || { title: "", slug: "", status: "draft", priority: 100, button_ids: [] });
+    form.setFieldsValue(row ? { ...row, primary_topic_id: row.primary_topic_id || row.category_id, topic_ids: row.topic_ids || (row.category_id ? [row.category_id] : []) } : { title: "", slug: "", status: "draft", priority: 100, button_ids: [], topic_ids: [] });
     if (!row?.id) {
       setTranslations({ [selected]: emptyTranslation({ code: selected }) });
       return;
@@ -310,7 +310,9 @@ function VisualGuideStudio() {
           status: form.getFieldValue("status") || "draft",
           language: activeLocale,
           priority: form.getFieldValue("priority") || 100,
-          category_id: form.getFieldValue("category_id"),
+          category_id: form.getFieldValue("primary_topic_id") || form.getFieldValue("category_id"),
+          primary_topic_id: form.getFieldValue("primary_topic_id") || form.getFieldValue("category_id"),
+          topic_ids: form.getFieldValue("topic_ids") || [],
           keywords: document.keywords,
           button_ids: form.getFieldValue("button_ids") || [],
         });
@@ -340,7 +342,9 @@ function VisualGuideStudio() {
           image_urls_hi: guide.image_urls_hi || [],
           cover_image_url_hi: guide.cover_image_url_hi || "",
           slug: form.getFieldValue("slug"),
-          category_id: form.getFieldValue("category_id"),
+          category_id: form.getFieldValue("primary_topic_id") || form.getFieldValue("category_id"),
+          primary_topic_id: form.getFieldValue("primary_topic_id") || form.getFieldValue("category_id"),
+          topic_ids: form.getFieldValue("topic_ids") || [],
           priority: form.getFieldValue("priority"),
           status: guide.status || "draft",
           button_ids: form.getFieldValue("button_ids") || [],
@@ -392,7 +396,7 @@ function VisualGuideStudio() {
     <Table rowKey="id" loading={loading} dataSource={rows} pagination={{ pageSize: 20 }} columns={[
       { title: "Guide", render: (_: any, row: any) => <div><b>{row.title}</b><div style={{ color: "#8ea0bd", fontSize: 12 }}>{row.slug}</div></div> },
       { title: "Available locales", dataIndex: "locale_coverage", render: (coverage: any) => <Space wrap>{Object.entries(coverage || {}).map(([code, status]: any) => <Tag key={code} color={status === "published" ? "green" : "gold"}>{code} · {status}</Tag>)}</Space> },
-      { title: "Category", dataIndex: "category_name", width: 150 },
+      { title: "Topics", width: 260, render: (_: any, row: any) => <Space wrap>{(row.topics?.length ? row.topics : [{ name: row.category_name || "—", is_primary: true }]).map((topic: any) => <Tag key={`${row.id}-${topic.id || topic.name}`} color={topic.is_primary ? "blue" : "default"}>{topic.name || topic.slug}{topic.is_primary ? " · primary" : ""}</Tag>)}</Space> },
       { title: "Status", dataIndex: "publication_status", width: 190, render: (value: string, row: any) => {
         const status = value || row.status || "draft";
         const color = status === "published" ? "green" : status === "partially_published" ? "blue" : status === "archived" ? "default" : "gold";
@@ -406,8 +410,9 @@ function VisualGuideStudio() {
         <Row gutter={12}>
           <Col xs={24} md={8}><Form.Item label="Guide locale" required><Select value={activeLocale || defaultLocale} onChange={setActiveLocale} options={locales.map((locale) => ({ value: locale.code, label: `${localeName(locale)}${locale.is_default ? " · default" : ""}` }))} /></Form.Item></Col>
           <Col xs={24} md={8}><Form.Item name="slug" label="Stable slug" rules={[{ required: true }]}><Input placeholder="deposit-not-received" /></Form.Item></Col>
-          <Col xs={24} md={8}><Form.Item name="category_id" label="Category"><Select allowClear options={categories.map((category) => ({ value: category.id, label: category.name }))} /></Form.Item></Col>
+          <Col xs={24} md={8}><Form.Item name="primary_topic_id" label="Primary topic"><Select allowClear showSearch optionFilterProp="label" onChange={(value) => { const current = form.getFieldValue("topic_ids") || []; form.setFieldValue("topic_ids", value ? [...new Set([value, ...current])] : current); }} options={categories.map((category) => ({ value: category.id, label: category.name }))} /></Form.Item></Col>
         </Row>
+        <Form.Item name="topic_ids" label="Topics" extra="Assign one or more searchable topics. The primary topic is always kept in the selection."><Select mode="multiple" allowClear showSearch optionFilterProp="label" options={categories.map((category) => ({ value: category.id, label: category.name }))} /></Form.Item>
         <Row gutter={12}>
           <Col xs={24} md={12}><Form.Item name="title" label={`${localeName(activeLocaleMeta)} title`} rules={[{ required: true }]}><Input onChange={(event) => updateActiveDocument({ title: event.target.value })} /></Form.Item></Col>
           <Col xs={24} md={12}><Form.Item name="summary" label="Summary"><Input onChange={(event) => updateActiveDocument({ summary: event.target.value })} /></Form.Item></Col>

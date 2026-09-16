@@ -53,6 +53,8 @@ export default function AccountSecurityDrawer({ open, required = false, onClose,
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [setup, setSetup] = useState<SetupResult | null>(null);
   const [code, setCode] = useState("");
+  const [testCode, setTestCode] = useState("");
+  const [testResult, setTestResult] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const profileChangeRef = useRef(onProfileChange);
   profileChangeRef.current = onProfileChange;
@@ -68,6 +70,8 @@ export default function AccountSecurityDrawer({ open, required = false, onClose,
     if (!open) return;
     setSetup(null);
     setCode("");
+    setTestCode("");
+    setTestResult(null);
     load().catch((error: unknown) =>
       message.error(errorMessage(error, t("Failed to load account security"))),
     );
@@ -103,6 +107,19 @@ export default function AccountSecurityDrawer({ open, required = false, onClose,
     } finally {
       setBusy(false);
     }
+  };
+
+  const test2fa = async () => {
+    if (!/^\d{6}$/.test(testCode)) { message.warning(t('Enter a valid 6-digit code')); return; }
+    setBusy(true);
+    try {
+      const result: any = await api.verifyOwn2FA(testCode);
+      setTestResult(result);
+      setTestCode('');
+      message.success(t('2FA code verified successfully'));
+    } catch (error: unknown) {
+      message.error(errorMessage(error, t('2FA verification failed')));
+    } finally { setBusy(false); }
   };
 
   const disable = async () => {
@@ -195,6 +212,16 @@ export default function AccountSecurityDrawer({ open, required = false, onClose,
                     {t("Disable 2FA")}
                   </Button>
                 </Popconfirm>
+                <Divider />
+                <Typography.Title level={5} style={{ marginBottom: 6 }}>{t('Test my 2FA code')}</Typography.Title>
+                <Typography.Paragraph type="secondary">
+                  {t('Verify your authenticator is working. A successful test consumes this 30-second code, so wait for the next code before using 2FA again.')}
+                </Typography.Paragraph>
+                <Space.Compact style={{ width: '100%' }}>
+                  <Input value={testCode} onChange={(event) => setTestCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder={t('Current 6-digit code')} inputMode="numeric" autoComplete="one-time-code" maxLength={6} />
+                  <Button onClick={() => void test2fa()} loading={busy}>{t('Test code')}</Button>
+                </Space.Compact>
+                {testResult?.verified ? <Alert type="success" showIcon style={{ marginTop: 10 }} message={t('Code verified and consumed')} description={`${t('Use a new authenticator code after approximately')} ${testResult.next_code_in_seconds || 30}s.`} /> : null}
                 {profile.twofa_required ? (
                   <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
                     {t("2FA is required by the platform owner and cannot be disabled.")}

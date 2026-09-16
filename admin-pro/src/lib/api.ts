@@ -247,6 +247,8 @@ function normalizeForCreate(resource: string, data: any): any {
       status: data.status || "active",
       is_active: data.status !== "inactive",
       twofa_required: data.twofa_required === true,
+      require_2fa: data.require_2fa === true,
+      permissions: Array.isArray(data.permissions) ? data.permissions : undefined,
       permissions: Array.isArray(data.permissions) ? data.permissions : undefined,
     };
   }
@@ -301,7 +303,10 @@ function normalizeForCreate(resource: string, data: any): any {
       language: data.language || "en",
       priority: Number(data.priority || 100),
       status: data.status || "published",
-      category_id: data.category_id || null,
+      category_id: data.category_id || data.primary_topic_id || null,
+      primary_topic_id: data.primary_topic_id || data.category_id || null,
+      topic_ids: Array.isArray(data.topic_ids) ? data.topic_ids : [],
+      topic_slugs: Array.isArray(data.topic_slugs) ? data.topic_slugs : [],
       category_slug: data.category_slug || data.category || "",
       button_ids: Array.isArray(data.button_ids) ? data.button_ids : String(data.button_ids || "").split(/\r?\n|,/).map((x) => Number(x.trim())).filter(Boolean),
     };
@@ -741,6 +746,19 @@ export const api = {
   createPlatformMember: async (platformId: string | number, data: any) => request(`/admin/platforms/${platformId}/members`, { method: "POST", body: JSON.stringify(data) }),
   removePlatformMember: async (membershipId: string | number) => request(`/admin/platform-memberships/${membershipId}`, { method: "DELETE" }),
   updatePlatformFeature: async (platformId: string | number, featureKey: string, data: any) => request(`/admin/platforms/${platformId}/features/${encodeURIComponent(featureKey)}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  verifyOwn2FA: async (code: string) => {
+    if (MOCK_MODE) return delay({ ok:true,verified:true,code_consumed:true,verified_at:new Date().toISOString(),next_code_in_seconds:18 });
+    return request('/admin/me/2fa/verify', { method:'POST', body:JSON.stringify({ code }) });
+  },
+  forceLogoutPlatformAdmin: async (membershipId: string | number) => {
+    if (MOCK_MODE) return delay({ ok:true });
+    return request(`/admin/platform-admin-users/${membershipId}/force-logout`, { method:'POST', body:JSON.stringify({}) });
+  },
+  resetPlatformAdmin2FA: async (membershipId: string | number) => {
+    if (MOCK_MODE) return delay({ ok:true,twofa_enabled:false });
+    return request(`/admin/platform-admin-users/${membershipId}/reset-2fa`, { method:'POST', body:JSON.stringify({}) });
+  },
 
   setup2FA: async () => {
     if (MOCK_MODE) return delay({ ok: true, secret: "MOCKSECRET", otpauth_url: "" });

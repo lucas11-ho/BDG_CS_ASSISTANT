@@ -40,6 +40,8 @@ function faqUpdatePayload(row: any, status?: string) {
     image_urls: Array.isArray(row.image_urls) ? row.image_urls : [],
     locale: row.locale || "en",
     topic: String(row.topic || row.category || "General").trim() || "General",
+    primary_topic_id: row.primary_topic_id || row.category_id || null,
+    topic_ids: Array.isArray(row.topic_ids) ? row.topic_ids : [],
     keywords: row.keywords || "",
     priority: Number(row.priority || 100),
     status: status || row.status || "draft",
@@ -54,6 +56,7 @@ async function inChunks<T>(items: T[], size: number, worker: (item: T) => Promis
 
 function FaqStudioPage() {
   const [rows, setRows] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [editing, setEditing] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -73,11 +76,13 @@ function FaqStudioPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [faqRows, registry] = await Promise.all([
+      const [faqRows, registry, categoryRows] = await Promise.all([
         api.list("faq") as Promise<any[]>,
         api.getLocaleRegistry(),
+        api.list("categories") as Promise<any[]>,
       ]);
       setRows(faqRows || []);
+      setCategories(categoryRows || []);
       const options = Array.isArray(registry?.locales)
         ? registry.locales.map((locale: any) => ({ value: String(locale.code), label: `${String(locale.code).toUpperCase()} — ${locale.label || locale.code}` }))
         : [];
@@ -97,11 +102,12 @@ function FaqStudioPage() {
   const filteredRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return rows.filter((row) => {
-      const matchesSearch = !needle || [row.question, row.answer, row.keywords, row.topic, row.category]
+      const matchesSearch = !needle || [row.question, row.answer, row.keywords, row.topic, row.category, ...(row.topics || []).flatMap((topic: any) => [topic.name, topic.slug])]
         .some((value) => String(value || "").toLowerCase().includes(needle));
       const matchesLocale = !localeFilter || String(row.locale || "en") === localeFilter;
       const topic = String(row.topic || row.category || "General").trim() || "General";
-      const matchesTopic = !topicFilter || topic === topicFilter;
+      const rowTopicLabels = (row.topics || []).flatMap((item: any) => [String(item.name || ''), String(item.slug || '')]);
+      const matchesTopic = !topicFilter || topic === topicFilter || rowTopicLabels.includes(topicFilter);
       const matchesStatus = !statusFilter || String(row.status || "draft") === statusFilter;
       return matchesSearch && matchesLocale && matchesTopic && matchesStatus;
     });
@@ -113,12 +119,12 @@ function FaqStudioPage() {
   }, [rows, selectedRowKeys]);
 
   const openEditor = (item?: any) => {
-    const current = item || { question: "", topic: "General", locale: defaultLocale || localeOptions[0]?.value || "en", status: "published", priority: 100, keywords: "" };
+    const current = item || { question: "", topic: "General", topic_ids: [], primary_topic_id: null, locale: defaultLocale || localeOptions[0]?.value || "en", status: "published", priority: 100, keywords: "" };
     setEditing(current);
     setAnswerJson(current.answer_json || blankDoc);
     setAnswerHtml(current.answer_html || "");
     setImageUrls(Array.isArray(current.image_urls) ? current.image_urls : []);
-    form.setFieldsValue({ ...current, topic: current.topic || current.category || "General" });
+    form.setFieldsValue({ ...current, topic: current.topic || current.category || "General", primary_topic_id: current.primary_topic_id || current.category_id || null, topic_ids: current.topic_ids || (current.category_id ? [current.category_id] : []) });
   };
   const closeEditor = () => { setEditing(null); form.resetFields(); setAnswerJson(blankDoc); setAnswerHtml(""); setImageUrls([]); };
   const uploadImage = async (file: File) => (await api.upload(file)).url;
@@ -131,7 +137,7 @@ function FaqStudioPage() {
     try {
       const values = await form.validateFields();
       setSaving(true);
-      const payload = { ...values, topic: String(values.topic || "General").trim() || "General", answer: answerHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(), answer_html: answerHtml, answer_json: answerJson, image_urls: imageUrls };
+      const payload = { ...values, topic: String(values.topic || "General").trim() || "General", primary_topic_id: values.primary_topic_id || null, topic_ids: values.topic_ids || [], answer: answerHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(), answer_html: answerHtml, answer_json: answerJson, image_urls: imageUrls };
       if (editing?.id) await api.update("faq", editing.id, payload); else await api.create("faq", payload);
       message.success(editing?.id ? "FAQ updated" : "FAQ created"); closeEditor(); await load();
     } catch (error: any) { if (error?.errorFields) return; message.error(error?.message || "Could not save FAQ"); }
@@ -167,7 +173,7 @@ function FaqStudioPage() {
   const columns = useMemo(() => [
     { title: "Question", dataIndex: "question", render: (value: string) => <b>{value}</b> },
     { title: "Locale", dataIndex: "locale", width: 100, render: (value: string) => <Tag>{String(value || "en").toUpperCase()}</Tag> },
-    { title: "Topic", dataIndex: "topic", width: 160, render: (value: string) => <Tag color="blue">{value || "General"}</Tag> },
+    { title: "Topics", width: 260, render: (_: any, row: any) => <Space wrap>{(row.topics?.length ? row.topics : [{ name: row.topic || row.category || "General", is_primary: true }]).map((topic: any) => <Tag key={`${row.id}-${topic.id || topic.name}`} color={topic.is_primary ? "blue" : "default"}>{topic.name || topic.slug}{topic.is_primary ? " · primary" : ""}</Tag>)}</Space> },
     { title: "Answer", dataIndex: "answer", ellipsis: true },
     { title: "Status", dataIndex: "status", width: 115, render: (value: string) => <Tag color={value === "published" ? "green" : value === "archived" ? "default" : "gold"}>{value || "draft"}</Tag> },
     { title: "Actions", width: 150, render: (_: any, row: any) => <Space><Button size="small" icon={<EditOutlined />} onClick={() => openEditor(row)}>Edit</Button><Popconfirm title="Delete this FAQ?" description="This removes the selected FAQ from the current platform." onConfirm={() => remove(row.id)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
@@ -215,10 +221,12 @@ function FaqStudioPage() {
         <Form.Item name="question" label="Question" rules={[{ required: true }]}><Input placeholder="How do I make a deposit?" /></Form.Item>
         <Space style={{ display: "flex", flexWrap: "wrap" }} align="start">
           <Form.Item name="locale" label="Locale" rules={[{ required: true }]} style={{ width: 250 }}><Select showSearch optionFilterProp="label" loading={loading && !localeOptions.length} options={localeOptions} placeholder="Choose a platform locale" /></Form.Item>
-          <Form.Item name="topic" label="Topic (localized)" rules={[{ required: true, message: "Topic is required" }]} style={{ width: 260 }} extra="Use the same language as this FAQ locale."><Input maxLength={160} placeholder="General / Deposit / Withdrawal / Bank" /></Form.Item>
+          <Form.Item name="primary_topic_id" label="Primary topic" style={{ width: 260 }}><Select allowClear showSearch optionFilterProp="label" onChange={(value) => { const current = form.getFieldValue("topic_ids") || []; form.setFieldValue("topic_ids", value ? [...new Set([value, ...current])] : current); const category = categories.find((item) => Number(item.id) === Number(value)); if (category?.name) form.setFieldValue("topic", category.name); }} options={categories.map((category) => ({ value: category.id, label: category.name }))} /></Form.Item>
           <Form.Item name="status" label="Status" style={{ width: 180 }}><Select options={["published", "draft", "archived"].map((value) => ({ value, label: value }))} /></Form.Item>
           <Form.Item name="priority" label="Priority"><InputNumber min={1} max={999} /></Form.Item>
         </Space>
+        <Form.Item name="topic_ids" label="Topics" extra="Choose every topic this FAQ belongs to. The primary topic is used as the compatibility label."><Select mode="multiple" allowClear showSearch optionFilterProp="label" options={categories.map((category) => ({ value: category.id, label: category.name }))} /></Form.Item>
+        <Form.Item name="topic" hidden><Input /></Form.Item>
         <Form.Item name="keywords" label="Search keywords and misspellings"><Input.TextArea rows={3} /></Form.Item>
         <Form.Item name="answer" hidden><Input /></Form.Item>
         <Form.Item label="FAQ answer — rich editor"><RichKnowledgeEditor value={answerJson} onChange={(json, html) => { setAnswerJson(json); setAnswerHtml(html); }} uploadImage={uploadImage} /></Form.Item>
