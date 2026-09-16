@@ -11,7 +11,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "migrate": "node src/migrate.js",
-    "check": "node --check src/server.js && node --check src/core.js && node --check src/bulk-content-studio.js && node --check src/faq-topics.js && node --check src/localized-categories-analytics.js && node --check src/chat-reliability.js && node --check src/prompt-runtime.js && node --check src/support-auth.js && node --check src/support-events.js && node --check src/support-service.js && node --check src/support-realtime.js && node --check src/plain-text-ai.js && node --check src/ai-job-worker.js && node --check src/r2-adapter.js && node --check src/platform-transfer.js && node --check src/env.js && node --check src/rich-html.js && node --check src/network-safety.js && node --check src/commerce-connector.js && node --check src/migration-files.js",
+    "check": "node --check src/server.js && node --check src/core.js && node --check src/bulk-content-studio.js && node --check src/faq-topics.js && node --check src/multi-topics.js && node --check src/localized-categories-analytics.js && node --check src/chat-reliability.js && node --check src/prompt-runtime.js && node --check src/support-auth.js && node --check src/support-events.js && node --check src/support-service.js && node --check src/support-realtime.js && node --check src/plain-text-ai.js && node --check src/ai-job-worker.js && node --check src/r2-adapter.js && node --check src/platform-transfer.js && node --check src/env.js && node --check src/rich-html.js && node --check src/network-safety.js && node --check src/commerce-connector.js && node --check src/migration-files.js",
     "smoke": "node scripts/smoke-test.js",
     "test:regression": "node scripts/regression-test.js",
     "test:upload": "node scripts/upload-regression-test.js",
@@ -50,7 +50,8 @@
     "test:v1202-admin-security": "node scripts/v1.20.2-admin-2fa-permissions-regression-test.js && node scripts/v1.21.0-localized-categories-analytics-regression-test.js",
     "test:v1210-localized-analytics": "node scripts/v1.21.0-localized-categories-analytics-regression-test.js",
     "test:v1220-platform-transfer": "node scripts/v1.22.0-secure-platform-transfer-regression-test.js",
-    "test:v1221-stability": "node scripts/v1.22.1-stability-performance-regression-test.js"
+    "test:v1221-stability": "node scripts/v1.22.1-stability-performance-regression-test.js",
+    "test:v1230-topics-security": "node scripts/v1.23.0-topics-security-regression-test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1085.0",

@@ -25,6 +25,7 @@ import {
   handleFaqTopicBulkRoute,
   persistFaqTopicFromResponse,
 } from './faq-topics.js';
+import { closeMultiTopicPools, enrichTopicsResponse, syncTopicsFromResponse } from './multi-topics.js';
 import {
   closeLocalizedContentAnalyticsPools,
   enrichCategoryListResponse,
@@ -34,8 +35,13 @@ import {
 } from './localized-categories-analytics.js';
 
 const env = getRuntimeEnv();
-const API_VERSION = '1.22.1-stability-performance';
+const API_VERSION = '1.23.0-topics-security-control';
 const API_FEATURES = [
+  'multi-topic-content',
+  'membership-scoped-permissions',
+  'platform-twofa-policy',
+  'self-twofa-verification',
+  'security-permissions-control-center',
   'secure-platform-transfer',
   'stability-performance',
   'single-flight-background-refresh',
@@ -372,11 +378,22 @@ const server = http.createServer(async (req, res) => {
 
     const isFaqWrite = response.ok && ((method === 'POST' && path === '/admin/faqs') || (method === 'PUT' && /^\/admin\/faqs\/\d+$/.test(path)));
     const isFaqRead = response.ok && method === 'GET' && (path === '/admin/faqs' || path === '/faqs' || path === '/public/faqs');
+    const isGuideWrite = response.ok && ((method === 'POST' && path === '/admin/guides') || (method === 'PUT' && /^\/admin\/guides\/\d+$/.test(path)));
+    const isGuideRead = response.ok && method === 'GET' && (path === '/admin/guides' || path === '/guides' || path === '/public/guides' || /^\/guides\/[^/]+$/.test(path));
     if (isFaqWrite) {
       await persistFaqTopicFromResponse(response, env, faqTopicFromJsonBody(body));
+      response = await syncTopicsFromResponse(response, env, 'faq', body || {});
       response = await enrichFaqTopicResponse(response, env);
+      response = await enrichTopicsResponse(response, env, 'faq');
     } else if (isFaqRead) {
       response = await enrichFaqTopicResponse(response, env);
+      response = await enrichTopicsResponse(response, env, 'faq');
+    }
+    if (isGuideWrite) {
+      response = await syncTopicsFromResponse(response, env, 'guide', body || {});
+      response = await enrichTopicsResponse(response, env, 'guide');
+    } else if (isGuideRead) {
+      response = await enrichTopicsResponse(response, env, 'guide');
     }
     const isCategoryListRead = response.ok && method === 'GET' && (path === '/admin/categories' || path === '/categories' || path === '/public/categories');
     if (isCategoryListRead) {
@@ -458,6 +475,7 @@ async function shutdown(signal) {
     await supportGateway.close().catch(() => undefined);
     await closeSupportEventBus().catch(() => undefined);
     await closeFaqTopicPools().catch(() => undefined);
+    await closeMultiTopicPools().catch(() => undefined);
     await closeLocalizedContentAnalyticsPools().catch(() => undefined);
     await closeDatabasePools();
     process.exit(0);
