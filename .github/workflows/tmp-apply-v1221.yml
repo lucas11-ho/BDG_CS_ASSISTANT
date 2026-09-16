@@ -54,9 +54,8 @@ jobs:
           npm run typecheck
           npm run build
 
-      - name: Commit verified patch and remove temporary builder
+      - name: Commit verified patch
         run: |
-          rm -f scripts/tmp-apply-v1221.py .github/workflows/tmp-apply-v1221.yml
           git config user.name "lucas11-ho"
           git config user.email "lacus.mm.ph@gmail.com"
           git add -A
