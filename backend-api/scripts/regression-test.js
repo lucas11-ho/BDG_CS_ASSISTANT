@@ -51,7 +51,7 @@ expect("Domain mapping exposes missing configuration names", core.includes("cons
 expect("Render environment validation covers Cloudflare prerequisites", env.includes("CLOUDFLARE_CUSTOM_HOSTNAMES_ENABLED") && env.includes("CLOUDFLARE_API_TOKEN") && env.includes("CLOUDFLARE_ZONE_ID") && env.includes("CLOUDFLARE_SAAS_CNAME_TARGET"));
 expect("Admin disables Provision until Cloudflare is configured", domainPage.includes("const cloudflareReady = data?.cloudflare?.configured === true") && domainPage.includes("disabled={!cloudflareReady}"));
 expect("Admin displays the exact missing Render variables", domainPage.includes("data?.cloudflare?.missing_env") && domainPage.includes("Configure these Render variables only when you need client-owned custom domains"));
-expect("Admin release marker is v1.22.0", adminLayout.includes('const ADMIN_VERSION = "v1.22.0"'));
+expect("Admin release marker is v1.22.1", adminLayout.includes('const ADMIN_VERSION = "v1.22.1"'));
 expect("v1.14.1 single-image contract remains present", core.includes("const legacyContentImages = imageDelivery.image_count ? [] : contentImages") && core.includes("A response without procedural steps has one canonical visual at most"));
 expect("Platform context remains strict with no fallback", core.includes("PLATFORM_CONTEXT_REQUIRED") && core.includes("fallback_applied: false") && !core.includes("publicReference || 'default'"));
 expect("v1.14.3 migration repairs existing parent Guide drafts", publishingMigration.includes("UPDATE guides g") && publishingMigration.includes("gt.status = 'published'"));
