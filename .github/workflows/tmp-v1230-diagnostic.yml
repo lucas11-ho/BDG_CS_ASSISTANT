@@ -1,0 +1,29 @@
+name: Temporary v1.23.0 diagnostic
+
+on:
+  push:
+    branches:
+      - feature/v1.23.0-topics-security-control-center
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect v1.23 integration points
+        run: |
+          echo '--- current TOTP implementation ---'
+          grep -n -B 35 -A 120 "verifyAndConsumeAdminTotp\|setupOwn2fa\|disableOwn2fa\|resetAdmin2fa" backend-api/src/core.js | head -n 900 || true
+          echo '--- platform member output and functions ---'
+          grep -n -B 30 -A 120 "function platformMemberOut\|listCurrentPlatformAdmins\|updateCurrentPlatformAdmin" backend-api/src/core.js | head -n 900 || true
+          echo '--- guide import/export category fields ---'
+          grep -n -B 30 -A 100 "Category Slug\|category_slug\|category_id" backend-api/src/bulk-content-studio.js | head -n 1000 || true
+          echo '--- platform transfer tables and remapping ---'
+          grep -n -B 30 -A 100 "TABLE_COLUMNS\|categories\|guides\|faqs\|category_id" backend-api/src/platform-transfer.js | head -n 1200 || true
+          echo '--- AI guide/FAQ source queries ---'
+          grep -n -B 30 -A 100 "guideSourceRows\|faqSourceRows\|FROM guides\|FROM faqs" backend-api/src/core.js | head -n 1100 || true
+          echo '--- public guide topic filtering ---'
+          grep -Rni -B 15 -A 55 "category_slug\|category_id\|category_name\|faq.category\|faq.topic" guide-pro/src/routes guide-pro/src/components/public | head -n 1400 || true
