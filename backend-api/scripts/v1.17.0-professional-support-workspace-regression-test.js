@@ -16,7 +16,7 @@ const staff=read('staff-pro/src/App.tsx');
 const chat=read('chat-pro/src/App.tsx');
 const chatApi=read('chat-pro/src/lib/api.ts');
 const checks=[
- ['v1.17.0 features remain active',core.includes('1.22.1-stability-performance')&&server.includes('1.22.1-stability-performance')],
+ ['v1.17.0 features remain active',core.includes('1.23.0-topics-security-control')&&server.includes('1.23.0-topics-security-control')],
  ['migration 043 accepts staff domain mappings',migration.includes("'chat','guide','admin','staff'")],
  ['migration 043 creates secure support attachments',migration.includes('CREATE TABLE IF NOT EXISTS support_attachments')&&migration.includes('sha256 VARCHAR(64)')],
  ['migration 043 creates customer context',migration.includes('CREATE TABLE IF NOT EXISTS support_customer_context')&&migration.includes('browser_name')],
