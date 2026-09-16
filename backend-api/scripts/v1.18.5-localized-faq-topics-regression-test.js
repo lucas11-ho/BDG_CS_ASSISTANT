@@ -44,12 +44,15 @@ await test('Legacy API clients that omit Topic do not erase a saved Topic', asyn
   assert.ok(source.includes('if (!response?.ok || topic == null) return'));
 });
 
-await test('Admin exposes localized Topic management and Excel preview', async () => {
+await test('Admin preserves localized Topic compatibility while exposing multi-topic management and Excel preview', async () => {
   const page = fs.readFileSync(new URL('../../admin-pro/src/routes/_admin.faq.tsx', import.meta.url), 'utf8');
   const toolbar = fs.readFileSync(new URL('../../admin-pro/src/components/BulkContentRouteToolbar.tsx', import.meta.url), 'utf8');
-  assert.ok(page.includes('Topic (localized)'));
-  assert.ok(page.includes('Use the same language as this FAQ locale.'));
-  assert.ok(page.includes('dataIndex: "topic"'));
+  assert.ok(page.includes('name="primary_topic_id" label="Primary topic"'));
+  assert.ok(page.includes('name="topic_ids" label="Topics"'));
+  assert.ok(page.includes('mode="multiple"'));
+  assert.ok(page.includes('name="topic" hidden'));
+  assert.ok(page.includes('topic: String(values.topic || "General").trim() || "General"'));
+  assert.ok(toolbar.includes('Topic is locale-specific, so use the same language as each FAQ row.'));
   assert.match(toolbar, /title:\s*(?:t\()?['"]Topic['"]\)?\s*,\s*dataIndex:\s*['"]topic['"]/);
 });
 
