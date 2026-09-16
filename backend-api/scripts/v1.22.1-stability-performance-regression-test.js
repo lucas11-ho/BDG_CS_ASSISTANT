@@ -13,7 +13,7 @@ const publicLayout = read('../../guide-pro/src/components/public/PublicLayout.ts
 const guideHome = read('../../guide-pro/src/routes/_public.index.tsx');
 const guideContent = read('../../guide-pro/src/lib/platform-guide-content.ts');
 
-assert.ok(server.includes("const API_VERSION = '1.22.1-stability-performance'"));
+assert.ok(server.includes("const API_VERSION = '1.23.0-topics-security-control'"));
 for (const feature of ['stability-performance','single-flight-background-refresh','visibility-aware-polling','analytics-summary-cache','guide-runtime-cache','bounded-category-icons']) assert.ok(server.includes(`'${feature}'`), `missing feature ${feature}`);
 assert.ok(customerService.includes('refreshInFlightRef'));
 assert.ok(customerService.includes('document.visibilityState==="hidden"'));
