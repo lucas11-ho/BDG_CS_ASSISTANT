@@ -32,6 +32,7 @@ type AdminUser = {
 const PERMISSION_OPTIONS = [
   "dashboard.view",
   "platform.view", "platform.manage",
+  "platform.transfer.generate", "platform.transfer.import", "platform.transfer.rollback",
   "content.view", "content.manage",
   "ai.view", "ai.manage",
   "support.view", "support.manage",

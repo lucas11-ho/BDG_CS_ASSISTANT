@@ -34,8 +34,12 @@ import {
 } from './localized-categories-analytics.js';
 
 const env = getRuntimeEnv();
-const API_VERSION = '1.20.2-admin-2fa-permissions';
+const API_VERSION = '1.22.0-secure-platform-transfer';
 const API_FEATURES = [
+  'secure-platform-transfer',
+  'one-time-transfer-grants',
+  'encrypted-transfer-snapshots',
+  'platform-transfer-rollback',
   'cs-workspace-shared-domain',
   'staff-self-profile-management',
   'separate-staff-chat-avatar',

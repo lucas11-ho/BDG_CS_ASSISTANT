@@ -10,6 +10,16 @@ import { getCommerceConnector, updateCommerceConnector, testCommerceConnector, l
 import { sanitizeRichHtml } from './rich-html.js';
 import { compilePromptRuntime } from './prompt-runtime.js';
 import { createSupportToken } from './support-auth.js';
+import {
+  PLATFORM_TRANSFER_PERMISSIONS,
+  createPlatformTransferGrant,
+  listPlatformTransfers,
+  revokePlatformTransferGrant,
+  claimPlatformTransfer,
+  applyPlatformTransfer,
+  rollbackPlatformTransfer,
+  getPlatformTransferJob,
+} from './platform-transfer.js';
 import { emitSupportEvent } from './support-events.js';
 import { buildPlainTextSystemPrompt, enforceHandoffDisabledReply, explainMenuCandidateRanking, normalizePlainTextReply, providerFailureCustomerText, rankApprovedMenuCandidates, safeUnknownBusinessFactText } from './plain-text-ai.js';
 import {
@@ -38,11 +48,12 @@ const { Pool } = pg;
 const scryptAsync = promisify(scryptCallback);
 const pools = new Map();
 
-const VERSION = '1.20.2-admin-2fa-permissions';
+const VERSION = '1.22.0-secure-platform-transfer';
 
 const ADMIN_PERMISSION_CATALOG = Object.freeze([
   'dashboard.view',
   'platform.view', 'platform.manage',
+  ...PLATFORM_TRANSFER_PERMISSIONS,
   'content.view', 'content.manage',
   'ai.view', 'ai.manage',
   'support.view', 'support.manage',
@@ -238,6 +249,44 @@ async function route(request, env, url) {
   const scope = requiresPlatformScope(path) ? await resolveAdminPlatformScope(env, request, admin) : null;
   if (scope) scope.actor_email = admin?.email || '';
   if (scope) requirePlatformRoutePermission(scope, method, path);
+
+  if (scope && path.startsWith('/admin/platform-transfers')) {
+    const transferDeps = {
+      env,
+      query:(text,params) => q(env,text,params),
+      withTransaction:(callback) => withTransaction(env,callback),
+      scope,
+      admin,
+      audit:(action,type,id,details,auditScope) => audit(env,action,type,id,details,auditScope),
+    };
+    if (method === 'GET' && path === '/admin/platform-transfers') return json(await listPlatformTransfers(transferDeps),200,env);
+    if (method === 'POST' && path === '/admin/platform-transfers/grants') {
+      const payload = await readJson(request);
+      await requirePlatformTransferStepUp(env,admin,payload);
+      return json(await createPlatformTransferGrant({ ...transferDeps,payload }),201,env);
+    }
+    if (method === 'POST' && /^\/admin\/platform-transfers\/grants\/[0-9a-f-]{36}\/revoke$/i.test(path)) {
+      return json(await revokePlatformTransferGrant({ ...transferDeps,grantId:path.split('/')[4] }),200,env);
+    }
+    if (method === 'POST' && path === '/admin/platform-transfers/claim') {
+      const payload = await readJson(request);
+      return json(await claimPlatformTransfer({ ...transferDeps,secret:payload.secret }),201,env);
+    }
+    if (method === 'GET' && /^\/admin\/platform-transfers\/jobs\/[0-9a-f-]{36}$/i.test(path)) {
+      return json(await getPlatformTransferJob({ ...transferDeps,jobId:path.split('/').pop() }),200,env);
+    }
+    if (method === 'POST' && /^\/admin\/platform-transfers\/jobs\/[0-9a-f-]{36}\/apply$/i.test(path)) {
+      const payload = await readJson(request);
+      await requirePlatformTransferStepUp(env,admin,payload);
+      return json(await applyPlatformTransfer({ ...transferDeps,jobId:path.split('/')[4],confirmation:payload.confirmation }),200,env);
+    }
+    if (method === 'POST' && /^\/admin\/platform-transfers\/jobs\/[0-9a-f-]{36}\/rollback$/i.test(path)) {
+      const payload = await readJson(request);
+      await requirePlatformTransferStepUp(env,admin,payload);
+      return json(await rollbackPlatformTransfer({ ...transferDeps,jobId:path.split('/')[4],confirmation:payload.confirmation }),200,env);
+    }
+    bad('Platform transfer endpoint was not found',404,'TRANSFER_ROUTE_NOT_FOUND');
+  }
 
   if (path.startsWith('/admin/support')) {
     const supportResponse = await handleSupportAdminRoute({ request, env, url, path, method, scope, admin, deps:supportDependencies() });
@@ -2329,9 +2378,12 @@ async function resolveAdminPlatformScope(env, request, admin) {
     ...permissionsForMembershipRole(platformRole),
   ])];
   const explicitPermissions = admin.permissions == null ? null : new Set(admin.permissions);
-  const permissions = explicitPermissions == null
+  let permissions = explicitPermissions == null
     ? rolePermissions
     : rolePermissions.filter(permission => explicitPermissions.has(permission));
+  if (['tenant_owner','platform_owner'].includes(accessRole) && (explicitPermissions == null || explicitPermissions.has('platform.manage'))) {
+    permissions = [...new Set([...permissions,...PLATFORM_TRANSFER_PERMISSIONS])];
+  }
   const canManagePlatform = permissions.includes('platform.manage');
   const canWrite = permissions.some(permission => permission.endsWith('.manage'));
   const canUploadGuides = permissions.includes('content.manage');
@@ -2342,7 +2394,8 @@ async function getAdminPlatformContext(env, request, admin) {
   return { ok:true, version:VERSION, platform:scope, platform_resolution:platformResolutionDiagnostics(scope, scope.platform_context), access: { role:scope.access_role, permissions:scope.permissions, can_write:scope.can_write, can_manage_platform:scope.can_manage_platform, can_upload_guides:scope.can_upload_guides, can_publish_guides:scope.can_publish_guides } };
 }
 function permissionsForMembershipRole(role) {
-  if (['tenant_owner','tenant_admin','platform_owner','platform_admin'].includes(role)) return [...ADMIN_PERMISSION_CATALOG];
+  if (['tenant_owner','platform_owner'].includes(role)) return [...ADMIN_PERMISSION_CATALOG];
+  if (['tenant_admin','platform_admin'].includes(role)) return ADMIN_PERMISSION_CATALOG.filter((permission) => !permission.startsWith('platform.transfer.'));
   if (role === 'content_manager') return ['dashboard.view','content.view','content.manage','appearance.view'];
   if (role === 'ai_manager') return ['dashboard.view','content.view','ai.view','ai.manage','system.view'];
   if (role === 'support_analyst') return ['dashboard.view','support.view','chat.view','audit.view'];
@@ -5048,6 +5101,9 @@ function adminPermissionForRoute(method, path) {
   const manage = method !== 'GET';
   if (path === '/admin/me' || path.startsWith('/admin/me/') || path === '/admin/sessions' || path === '/admin/platform-context') return null;
   if (path.startsWith('/admin/admin-users')) return 'owner';
+  if (path.startsWith('/admin/platform-transfers/grants')) return 'platform.transfer.generate';
+  if (path.endsWith('/rollback') && path.startsWith('/admin/platform-transfers/jobs/')) return 'platform.transfer.rollback';
+  if (path.startsWith('/admin/platform-transfers')) return 'platform.transfer.import';
   if (path === '/admin/tenant-control-center' || path === '/admin/tenants' || path.startsWith('/admin/tenants/') || path.startsWith('/admin/platforms/') || path.startsWith('/admin/platform-domains/') || path.startsWith('/admin/platform-memberships/') || path.startsWith('/admin/platform-admin-users') || path.startsWith('/admin/domain-mapping') || path.startsWith('/admin/connector')) return `platform.${manage ? 'manage' : 'view'}`;
   if (path.includes('audit-logs')) return 'audit.view';
   if (path === '/admin/system-health' || path === '/admin/foundation-diagnostics' || path.includes('diagnostics')) return 'system.view';
@@ -5063,7 +5119,7 @@ function requireAdminRoutePermission(admin, method, path) {
   if (!required || admin?.role === 'owner') return;
   if (required === 'owner') bad('Owner permission required', 403, 'OWNER_PERMISSION_REQUIRED');
   if (admin.permissions == null) return; // Existing accounts preserve legacy access until the owner configures them.
-  if (!admin.permissions.includes(required)) bad(`Administrator permission required: ${required}`, 403, 'ADMIN_PERMISSION_DENIED');
+  if (!admin.permissions.includes(required) && !(required.startsWith('platform.transfer.') && admin.permissions.includes('platform.manage'))) bad(`Administrator permission required: ${required}`, 403, 'ADMIN_PERMISSION_DENIED');
 }
 function requireCompletedAdmin2fa(admin) {
   if (admin?.twofa_setup_required) bad('Set up two-factor authentication before using Admin', 403, 'TWOFA_SETUP_REQUIRED');
@@ -6611,6 +6667,14 @@ async function requireOwnerStepUp(env, admin, p = {}) {
     if (!code) bad('Enter the owner 2FA code to continue', 403, 'OWNER_2FA_REQUIRED');
     await verifyAndConsumeAdminTotp(env, owner, code, { invalidStatus:403 });
   }
+}
+async function requirePlatformTransferStepUp(env, admin, p = {}) {
+  const row = (await q(env, 'SELECT id,email,twofa_enabled,twofa_secret,twofa_last_counter,twofa_failed_attempts,twofa_locked_until FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
+  if (!row) bad('Administrator account was not found',404,'ADMIN_NOT_FOUND');
+  if (row.twofa_enabled !== true) bad('Enable two-factor authentication before transferring platform data',403,'TRANSFER_2FA_REQUIRED');
+  const code = p.twofa_code || p.code || p.otp;
+  if (!code) bad('Enter your current 2FA code to continue',403,'TRANSFER_2FA_CODE_REQUIRED');
+  await verifyAndConsumeAdminTotp(env,row,code,{ invalidStatus:403 });
 }
 async function setupOwn2fa(env, admin) {
   const current = (await q(env, 'SELECT id,twofa_enabled FROM admin_users WHERE lower(email)=lower($1) LIMIT 1', [admin.email])).rows[0];
