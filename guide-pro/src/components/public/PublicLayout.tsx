@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Home, BookOpen, MessageSquare, Languages } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -18,23 +18,24 @@ const SYSTEM_FONT_STACK = 'ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 
 export function PublicLayout({ children }: { children: ReactNode }) {
   const platformKey = getPlatformCacheKey();
+  const queryClient = useQueryClient();
   const { data: theme } = useQuery({
     queryKey: ["platform-theme", platformKey],
     queryFn: api.getSettings,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 5 * 60_000,
+    refetchOnMount: false,
   });
   const { data: experience } = useQuery({
     queryKey: ["platform-guide-experience", platformKey],
     queryFn: getPlatformGuideExperience,
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
+    staleTime: 5 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
     if (!experience) return;
-    if (syncStoredGuideLanguage(experience)) window.location.reload();
+    syncStoredGuideLanguage(experience);
   }, [experience]);
 
   const copy = useMemo(() => experience ? guideShellCopy(experience) : null, [experience]);
@@ -95,6 +96,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
         logoUrl={theme?.guide_logo_url || ""}
         languages={languages}
         activeLanguage={activeLanguage}
+        onLanguageChanged={() => void queryClient.invalidateQueries()}
       />
       <main
         className="mx-auto w-full px-4 pb-28 pt-4 md:pb-16"
@@ -114,6 +116,7 @@ function PublicHeader({
   logoUrl,
   languages,
   activeLanguage,
+  onLanguageChanged,
 }: {
   platformKey: string;
   platformName: string;
@@ -121,6 +124,7 @@ function PublicHeader({
   logoUrl: string;
   languages: { code: string; label: string }[];
   activeLanguage: string;
+  onLanguageChanged: () => void;
 }) {
   const [language, setLanguage] = useState<PublicLanguage>(() => activeLanguage as PublicLanguage);
 
@@ -129,7 +133,7 @@ function PublicHeader({
   const changeLanguage = (next: PublicLanguage) => {
     setLanguage(next);
     window.localStorage.setItem("bdg_public_language", String(next).toLowerCase());
-    window.location.reload();
+    onLanguageChanged();
   };
 
   return (

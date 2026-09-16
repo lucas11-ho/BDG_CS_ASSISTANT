@@ -26,7 +26,7 @@ function test(name, condition) {
   console.log(`PASS ${name}`);
 }
 
-test('v1.16.2 features remain active', core.includes('1.22.0-secure-platform-transfer') && server.includes('1.22.0-secure-platform-transfer'));
+test('v1.16.2 features remain active', core.includes('1.22.1-stability-performance') && server.includes('1.22.1-stability-performance'));
 test('migration 040 adds resume and read continuity fields', migration.includes('customer_resume_key_hash') && migration.includes('last_customer_read_sequence') && migration.includes('last_staff_read_sequence'));
 test('migration 040 creates one-time realtime tickets', migration.includes('CREATE TABLE IF NOT EXISTS support_realtime_tickets') && migration.includes('consumed_at') && migration.includes('expires_at'));
 test('migration 040 adds localized customer messages and fallback interval', migration.includes('customer_messages_json') && migration.includes('realtime_poll_interval_ms'));

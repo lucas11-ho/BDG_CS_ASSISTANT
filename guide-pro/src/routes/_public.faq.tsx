@@ -19,8 +19,8 @@ function FAQ() {
   const experience = useQuery({
     queryKey: ["platform-guide-experience", platformKey],
     queryFn: getPlatformGuideExperience,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 5 * 60_000,
+    refetchOnMount: false,
   });
   const copy = experience.data ? guideShellCopy(experience.data) : null;
   const lang = experience.data?.effectiveLocale || "en";

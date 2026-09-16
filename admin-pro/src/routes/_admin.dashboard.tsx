@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Card, Col, Empty, List, Row, Skeleton, Space, Statistic, Tag } from "antd";
 import {
   AppstoreOutlined,
@@ -64,6 +64,7 @@ function DashboardPage() {
   const [data, setData] = useState<any>(null);
   const [traffic, setTraffic] = useState<any>(null);
   const [error, setError] = useState("");
+  const trafficInFlightRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -75,12 +76,20 @@ function DashboardPage() {
 
   useEffect(() => {
     let active = true;
-    const load = () => contentAnalyticsApi.getTrafficAnalytics("7d")
-      .then((result) => { if (active) setTraffic(result); })
-      .catch(() => undefined);
-    void load();
-    const timer = window.setInterval(load, 10_000);
-    return () => { active = false; window.clearInterval(timer); };
+    let timer: number | undefined;
+    const load = async () => {
+      if (!active || trafficInFlightRef.current || document.visibilityState === "hidden") return;
+      trafficInFlightRef.current = true;
+      try {
+        const result = await contentAnalyticsApi.getTrafficAnalytics("7d");
+        if (active) setTraffic(result);
+      } catch {} finally { trafficInFlightRef.current = false; }
+    };
+    const schedule = () => { if (active) timer = window.setTimeout(async () => { await load(); schedule(); }, 60_000); };
+    void load().finally(schedule);
+    const onVisibility = () => { if (document.visibilityState === "visible") { if (timer) window.clearTimeout(timer); void load().finally(schedule); } };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { active = false; if (timer) window.clearTimeout(timer); document.removeEventListener("visibilitychange", onVisibility); };
   }, []);
 
   const checks = useMemo(

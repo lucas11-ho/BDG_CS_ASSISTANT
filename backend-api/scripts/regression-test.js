@@ -40,7 +40,7 @@ const chatApp = read("chat-pro/src/App.tsx");
 const chatConfig = read("chat-pro/src/lib/chat-config.ts");
 const plainTextAi = read("backend-api/src/plain-text-ai.js");
 
-expect("Backend and server report the current security release", core.includes("1.22.0-secure-platform-transfer") && server.includes("1.22.0-secure-platform-transfer"));
+expect("Backend and server report the current security release", core.includes("1.22.1-stability-performance") && server.includes("1.22.1-stability-performance"));
 expect("Domain route IDs are extracted from the numeric path segment", core.includes("function domainIdFromPath") && core.includes("Number.isSafeInteger(id)") && core.includes("DOMAIN_ID_INVALID"));
 expect("Provision uses the validated domain ID", core.includes("provisionMappedDomain(env, domainIdFromPath(path), scope)") && !core.includes("provisionMappedDomain(env, idFromParts(path, 3), scope)"));
 expect("Sync, verify, and delete use the validated domain ID", ["syncMappedDomain(env, domainIdFromPath(path), scope)", "verifyMappedDomain(env, domainIdFromPath(path), scope)", "deleteMappedDomain(env, domainIdFromPath(path), scope)"].every((item) => core.includes(item)));

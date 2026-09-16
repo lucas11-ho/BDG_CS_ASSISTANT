@@ -48,7 +48,7 @@ const { Pool } = pg;
 const scryptAsync = promisify(scryptCallback);
 const pools = new Map();
 
-const VERSION = '1.22.0-secure-platform-transfer';
+const VERSION = '1.22.1-stability-performance';
 
 const ADMIN_PERMISSION_CATALOG = Object.freeze([
   'dashboard.view',

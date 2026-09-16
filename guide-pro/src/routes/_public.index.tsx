@@ -22,9 +22,9 @@ function Home() {
   const content = useQuery({
     queryKey: ["platform-guide-experience", platformKey],
     queryFn: getPlatformGuideExperience,
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
+    staleTime: 5 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
   const categories = useQuery({ queryKey: ["categories", platformKey], queryFn: api.getCategories });
   const guides = useQuery({ queryKey: ["guides", platformKey], queryFn: () => api.getGuides() });

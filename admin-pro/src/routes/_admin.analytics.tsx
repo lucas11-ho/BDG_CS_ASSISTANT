@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Card, Col, Empty, Progress, Row, Select, Space, Statistic, Table, Tag, Typography } from "antd";
 import { EyeOutlined, GlobalOutlined, LaptopOutlined, ReloadOutlined, TeamOutlined } from "@ant-design/icons";
 import { contentAnalyticsApi } from "@/lib/content-analytics-api";
@@ -14,22 +14,44 @@ function TrafficAnalyticsPage() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const inFlightRef = useRef(false);
+  const failuresRef = useRef(0);
 
   const load = useCallback(async (quiet = false) => {
+    if (inFlightRef.current || (quiet && document.visibilityState === "hidden")) return;
+    inFlightRef.current = true;
     if (!quiet) setLoading(true);
     try {
       const result = await contentAnalyticsApi.getTrafficAnalytics(range);
       setData(result);
       setError("");
+      failuresRef.current = 0;
     } catch (reason: any) {
+      failuresRef.current = Math.min(failuresRef.current + 1, 3);
       setError(reason?.message || "Failed to load traffic analytics");
-    } finally { if (!quiet) setLoading(false); }
+    } finally {
+      inFlightRef.current = false;
+      if (!quiet) setLoading(false);
+    }
   }, [range]);
 
   useEffect(() => {
-    void load(false);
-    const timer = window.setInterval(() => void load(true), 10_000);
-    return () => window.clearInterval(timer);
+    let stopped = false;
+    let timer: number | undefined;
+    const schedule = () => {
+      if (stopped) return;
+      const delay = Math.min(120_000, 30_000 * (2 ** failuresRef.current));
+      timer = window.setTimeout(async () => { await load(true); schedule(); }, delay);
+    };
+    void load(false).finally(schedule);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        if (timer) window.clearTimeout(timer);
+        void load(true).finally(schedule);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { stopped = true; if (timer) window.clearTimeout(timer); document.removeEventListener("visibilitychange", onVisibility); };
   }, [load]);
 
   const maxLive = useMemo(() => Math.max(1, ...(data?.live_30m || []).map((item: any) => Number(item.views || 0))), [data]);
@@ -39,7 +61,7 @@ function TrafficAnalyticsPage() {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
       <div>
         <Space align="center"><Title level={3} style={{ margin: 0 }}>Traffic Analytics</Title><Tag color="green">LIVE</Tag></Space>
-        <Text type="secondary">Anonymous first-party visitor analytics for the current platform. Refreshes every 10 seconds.</Text>
+        <Text type="secondary">Anonymous first-party visitor analytics for the current platform. Refreshes every 30 seconds while this tab is visible.</Text>
       </div>
       <Space>
         <Select<Range> value={range} onChange={setRange} style={{ width: 150 }} options={[{ value: "24h", label: "24 hours" }, { value: "7d", label: "7 days" }, { value: "30d", label: "30 days" }]} />

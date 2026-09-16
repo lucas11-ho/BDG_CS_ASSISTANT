@@ -18,7 +18,7 @@ const backendPackage=JSON.parse(read('backend-api/package.json'));
 const checks=[];
 const expect=(name,condition)=>checks.push([name,Boolean(condition)]);
 
-expect('v1.17.1 features remain active on the current runtime',core.includes('1.22.0-secure-platform-transfer')&&server.includes('1.22.0-secure-platform-transfer'));
+expect('v1.17.1 features remain active on the current runtime',core.includes('1.22.1-stability-performance')&&server.includes('1.22.1-stability-performance'));
 expect('backend package version is current v1.18.0',backendPackage.version==='1.18.0');
 expect('Admin displays current v1.22.0',adminLayout.includes('const ADMIN_VERSION = "v1.22.0"'));
 expect('migration 044 adds explicit CORS policy fields',migration.includes('cors_allowed BOOLEAN NOT NULL DEFAULT TRUE')&&migration.includes('cors_activated_at TIMESTAMPTZ'));

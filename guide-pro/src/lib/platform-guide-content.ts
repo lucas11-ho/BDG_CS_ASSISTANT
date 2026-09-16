@@ -126,6 +126,10 @@ function languageLabel(code: string) {
   }
 }
 
+const experienceCache = new Map<string, { at: number; value: GuideExperience }>();
+const experienceFlights = new Map<string, Promise<GuideExperience>>();
+const EXPERIENCE_TTL_MS = 60_000;
+
 async function jsonFetch(url: string, headers?: HeadersInit) {
   const response = await fetch(url, { cache: "no-store", headers });
   if (!response.ok) throw new Error(`Guide configuration request failed (${response.status})`);
@@ -135,6 +139,14 @@ async function jsonFetch(url: string, headers?: HeadersInit) {
 export async function getPlatformGuideExperience(): Promise<GuideExperience> {
   if (!API_BASE) throw new Error("Guide API is not configured.");
   const platform = getPublicPlatformKey();
+  const requestedLanguage = localeKey(getPublicLanguage());
+  const cacheKey = `${platform || "default"}:${requestedLanguage}`;
+  const cached = experienceCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < EXPERIENCE_TTL_MS) return cached.value;
+  const existing = experienceFlights.get(cacheKey);
+  if (existing) return existing;
+  const flight = (async (): Promise<GuideExperience> => {
+
   const query = platform ? `?platform=${encodeURIComponent(platform)}` : "";
   const [manifest, context] = await Promise.all([
     jsonFetch(`${API_BASE}/guide/content${query}`),
@@ -152,9 +164,16 @@ export async function getPlatformGuideExperience(): Promise<GuideExperience> {
     code,
     label: manifest?.public_languages?.find((item: any) => localeKey(item?.code) === code)?.label || languageLabel(code),
   }));
-  const requested = localeKey(getPublicLanguage());
+  const requested = requestedLanguage;
   const effectiveLocale = codes.includes(requested) ? requested : defaultLocale;
   return { manifest, platformContext: context, defaultLocale, supportedLanguages, effectiveLocale };
+  })();
+  experienceFlights.set(cacheKey, flight);
+  try {
+    const value = await flight;
+    experienceCache.set(cacheKey, { at: Date.now(), value });
+    return value;
+  } finally { experienceFlights.delete(cacheKey); }
 }
 
 function localizedValue(experience: GuideExperience, field: string, fallback: string) {

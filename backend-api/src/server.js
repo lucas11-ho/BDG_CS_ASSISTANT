@@ -34,9 +34,15 @@ import {
 } from './localized-categories-analytics.js';
 
 const env = getRuntimeEnv();
-const API_VERSION = '1.22.0-secure-platform-transfer';
+const API_VERSION = '1.22.1-stability-performance';
 const API_FEATURES = [
   'secure-platform-transfer',
+  'stability-performance',
+  'single-flight-background-refresh',
+  'visibility-aware-polling',
+  'analytics-summary-cache',
+  'guide-runtime-cache',
+  'bounded-category-icons',
   'one-time-transfer-grants',
   'encrypted-transfer-snapshots',
   'platform-transfer-rollback',
