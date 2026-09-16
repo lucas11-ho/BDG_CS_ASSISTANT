@@ -249,7 +249,6 @@ function normalizeForCreate(resource: string, data: any): any {
       twofa_required: data.twofa_required === true,
       require_2fa: data.require_2fa === true,
       permissions: Array.isArray(data.permissions) ? data.permissions : undefined,
-      permissions: Array.isArray(data.permissions) ? data.permissions : undefined,
     };
   }
   if (resource === "site-content") {

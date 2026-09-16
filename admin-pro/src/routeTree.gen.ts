@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminUnmatchedQuestionsRouteImport } from './routes/_admin.unmatched-questions'
 import { Route as AdminThemeSettingsRouteImport } from './routes/_admin.theme-settings'
 import { Route as AdminSiteContentRouteImport } from './routes/_admin.site-content'
+import { Route as AdminSecurityPermissionsRouteImport } from './routes/_admin.security-permissions'
 import { Route as AdminPromptHistoryRouteImport } from './routes/_admin.prompt-history'
 import { Route as AdminPlatformTransferRouteImport } from './routes/_admin.platform-transfer'
 import { Route as AdminPlatformControlCenterRouteImport } from './routes/_admin.platform-control-center'
@@ -71,6 +72,12 @@ const AdminSiteContentRoute = AdminSiteContentRouteImport.update({
   path: '/site-content',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminSecurityPermissionsRoute =
+  AdminSecurityPermissionsRouteImport.update({
+    id: '/security-permissions',
+    path: '/security-permissions',
+    getParentRoute: () => AdminRoute,
+  } as any)
 const AdminPromptHistoryRoute = AdminPromptHistoryRouteImport.update({
   id: '/prompt-history',
   path: '/prompt-history',
@@ -232,6 +239,7 @@ export interface FileRoutesByFullPath {
   '/platform-control-center': typeof AdminPlatformControlCenterRoute
   '/platform-transfer': typeof AdminPlatformTransferRoute
   '/prompt-history': typeof AdminPromptHistoryRoute
+  '/security-permissions': typeof AdminSecurityPermissionsRoute
   '/site-content': typeof AdminSiteContentRoute
   '/theme-settings': typeof AdminThemeSettingsRoute
   '/unmatched-questions': typeof AdminUnmatchedQuestionsRoute
@@ -265,6 +273,7 @@ export interface FileRoutesByTo {
   '/platform-control-center': typeof AdminPlatformControlCenterRoute
   '/platform-transfer': typeof AdminPlatformTransferRoute
   '/prompt-history': typeof AdminPromptHistoryRoute
+  '/security-permissions': typeof AdminSecurityPermissionsRoute
   '/site-content': typeof AdminSiteContentRoute
   '/theme-settings': typeof AdminThemeSettingsRoute
   '/unmatched-questions': typeof AdminUnmatchedQuestionsRoute
@@ -300,6 +309,7 @@ export interface FileRoutesById {
   '/_admin/platform-control-center': typeof AdminPlatformControlCenterRoute
   '/_admin/platform-transfer': typeof AdminPlatformTransferRoute
   '/_admin/prompt-history': typeof AdminPromptHistoryRoute
+  '/_admin/security-permissions': typeof AdminSecurityPermissionsRoute
   '/_admin/site-content': typeof AdminSiteContentRoute
   '/_admin/theme-settings': typeof AdminThemeSettingsRoute
   '/_admin/unmatched-questions': typeof AdminUnmatchedQuestionsRoute
@@ -335,6 +345,7 @@ export interface FileRouteTypes {
     | '/platform-control-center'
     | '/platform-transfer'
     | '/prompt-history'
+    | '/security-permissions'
     | '/site-content'
     | '/theme-settings'
     | '/unmatched-questions'
@@ -368,6 +379,7 @@ export interface FileRouteTypes {
     | '/platform-control-center'
     | '/platform-transfer'
     | '/prompt-history'
+    | '/security-permissions'
     | '/site-content'
     | '/theme-settings'
     | '/unmatched-questions'
@@ -402,6 +414,7 @@ export interface FileRouteTypes {
     | '/_admin/platform-control-center'
     | '/_admin/platform-transfer'
     | '/_admin/prompt-history'
+    | '/_admin/security-permissions'
     | '/_admin/site-content'
     | '/_admin/theme-settings'
     | '/_admin/unmatched-questions'
@@ -455,6 +468,13 @@ declare module '@tanstack/react-router' {
       path: '/site-content'
       fullPath: '/site-content'
       preLoaderRoute: typeof AdminSiteContentRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/security-permissions': {
+      id: '/_admin/security-permissions'
+      path: '/security-permissions'
+      fullPath: '/security-permissions'
+      preLoaderRoute: typeof AdminSecurityPermissionsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/_admin/prompt-history': {
@@ -669,6 +689,7 @@ interface AdminRouteChildren {
   AdminPlatformControlCenterRoute: typeof AdminPlatformControlCenterRoute
   AdminPlatformTransferRoute: typeof AdminPlatformTransferRoute
   AdminPromptHistoryRoute: typeof AdminPromptHistoryRoute
+  AdminSecurityPermissionsRoute: typeof AdminSecurityPermissionsRoute
   AdminSiteContentRoute: typeof AdminSiteContentRoute
   AdminThemeSettingsRoute: typeof AdminThemeSettingsRoute
   AdminUnmatchedQuestionsRoute: typeof AdminUnmatchedQuestionsRoute
@@ -701,6 +722,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminPlatformControlCenterRoute: AdminPlatformControlCenterRoute,
   AdminPlatformTransferRoute: AdminPlatformTransferRoute,
   AdminPromptHistoryRoute: AdminPromptHistoryRoute,
+  AdminSecurityPermissionsRoute: AdminSecurityPermissionsRoute,
   AdminSiteContentRoute: AdminSiteContentRoute,
   AdminThemeSettingsRoute: AdminThemeSettingsRoute,
   AdminUnmatchedQuestionsRoute: AdminUnmatchedQuestionsRoute,
