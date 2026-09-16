@@ -1,0 +1,68 @@
+name: v1.23.0 feature verification
+
+on:
+  push:
+    branches:
+      - feature/v1.23.0-topics-security-control-center
+    paths:
+      - .github/workflows/tmp-v1230-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend-api/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run test:v1230-topics-security
+      - run: npm run test:v1221-stability
+      - run: npm run test:v1220-platform-transfer
+      - run: npm run test:v1202-admin-security
+      - run: npm run test:v1184-bulk-content
+
+  admin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: admin-pro
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: admin-pro/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:i18n
+      - run: npm run build
+
+  guide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: guide-pro
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: guide-pro/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
