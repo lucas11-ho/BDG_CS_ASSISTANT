@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
+// Final release verification contract for the v1.23.0 topics and security control center.
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const migration = read('../migrations/055_v1.23.0_topics_security_control.sql');
 const core = read('../src/core.js');
