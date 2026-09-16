@@ -686,6 +686,31 @@ export const api = {
     return request("/admin/platform-context");
   },
 
+  listPlatformTransfers: async () => {
+    if (MOCK_MODE) return delay({ ok:true,modules:[],grants:[],jobs:[],policy:{} });
+    return request("/admin/platform-transfers");
+  },
+  createPlatformTransferGrant: async (modules: string[], twofa_code: string) => {
+    if (MOCK_MODE) return delay({ ok:true,grant:{ id:crypto.randomUUID(),status:"created",modules,counts:{},expires_at:new Date(Date.now()+1800000).toISOString() },secret:"LTX1_MOCK",shown_once:true });
+    return request("/admin/platform-transfers/grants", { method:"POST",body:JSON.stringify({ modules,twofa_code }) });
+  },
+  revokePlatformTransferGrant: async (grantId: string) => {
+    if (MOCK_MODE) return delay({ ok:true });
+    return request(`/admin/platform-transfers/grants/${encodeURIComponent(grantId)}/revoke`, { method:"POST",body:JSON.stringify({}) });
+  },
+  claimPlatformTransfer: async (secret: string) => {
+    if (MOCK_MODE) return delay({ ok:true,job:{ id:crypto.randomUUID(),status:"preview",preview:{ totals:{ create:4,skip:1,replace:2,total:7 },modules:{} } },source:{ platform_name:"Source" },modules:[] });
+    return request("/admin/platform-transfers/claim", { method:"POST",body:JSON.stringify({ secret }) });
+  },
+  applyPlatformTransfer: async (jobId: string, confirmation: string, twofa_code: string) => {
+    if (MOCK_MODE) return delay({ ok:true,job:{ id:jobId,status:"completed",result:{ created:4,skipped:1,replaced:2 } } });
+    return request(`/admin/platform-transfers/jobs/${encodeURIComponent(jobId)}/apply`, { method:"POST",body:JSON.stringify({ confirmation,twofa_code }) });
+  },
+  rollbackPlatformTransfer: async (jobId: string, confirmation: string, twofa_code: string) => {
+    if (MOCK_MODE) return delay({ ok:true,job:{ id:jobId,status:"rolled_back" } });
+    return request(`/admin/platform-transfers/jobs/${encodeURIComponent(jobId)}/rollback`, { method:"POST",body:JSON.stringify({ confirmation,twofa_code }) });
+  },
+
   // v1.0 SaaS tenant core. The Control Center is intentionally explicit: it
   // never guesses a tenant from a browser query parameter.
   getTenantControlCenter: async () => {

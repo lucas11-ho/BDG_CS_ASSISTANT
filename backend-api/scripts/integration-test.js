@@ -435,6 +435,59 @@ try {
   const isolatedFaqs = expectStatus(await call('/admin/faqs', { platformRoute:isolatedPlatform.public_route_key }), 200, 'Read isolated platform FAQs');
   assert.equal(isolatedFaqs.some((row) => Number(row.id) === Number(createdFaq.id)), false, 'Platform-scoped API must not leak FAQ rows');
 
+  await database.query('UPDATE admin_users SET twofa_last_counter=NULL,twofa_failed_attempts=0,twofa_locked_until=NULL WHERE lower(email)=lower($1)', [env.ADMIN_EMAIL]);
+  const transferGrant = expectStatus(await call('/admin/platform-transfers/grants', {
+    method:'POST',
+    platformRoute:platform.public_route_key,
+    body:{ modules:['categories','guides','faqs','branding','assistant'], twofa_code:await currentTotp(ownerSecret) },
+  }), 201, 'Source owner creates a one-time encrypted platform transfer grant');
+  assert.match(transferGrant.secret, /^LTX1_[0-9a-f-]{36}\.[A-Za-z0-9_-]{40,}$/);
+  const storedTransferGrant = (await database.query('SELECT token_hash,manifest_ciphertext,status FROM platform_transfer_grants WHERE public_id=$1', [transferGrant.grant.id])).rows[0];
+  assert.notEqual(storedTransferGrant.token_hash, transferGrant.secret, 'Transfer secret must never be stored in plaintext');
+  assert.match(storedTransferGrant.manifest_ciphertext, /^enc\$v1\$/);
+  assert.doesNotMatch(storedTransferGrant.manifest_ciphertext, /Integration duplicate intent/);
+
+  const claimedTransfer = expectStatus(await call('/admin/platform-transfers/claim', {
+    method:'POST',
+    platformRoute:isolatedPlatform.public_route_key,
+    body:{ secret:transferGrant.secret },
+  }), 201, 'Destination owner consumes the one-time key and receives a conflict preview');
+  assert.equal(claimedTransfer.key_consumed,true);
+  assert.ok(Number(claimedTransfer.job.preview.totals.create) > 0);
+  const replayedTransferKey = expectStatus(await call('/admin/platform-transfers/claim', {
+    method:'POST',platformRoute:isolatedPlatform.public_route_key,body:{ secret:transferGrant.secret },
+  }), 409, 'One-time transfer key cannot be replayed');
+  assert.equal(replayedTransferKey.code,'TRANSFER_KEY_ALREADY_USED');
+
+  await database.query('UPDATE admin_users SET twofa_last_counter=NULL WHERE lower(email)=lower($1)', [env.ADMIN_EMAIL]);
+  const appliedTransfer = expectStatus(await call(`/admin/platform-transfers/jobs/${claimedTransfer.job.id}/apply`, {
+    method:'POST',
+    platformRoute:isolatedPlatform.public_route_key,
+    body:{ confirmation:'Integration Isolated',twofa_code:await currentTotp(ownerSecret) },
+  }), 200, 'Destination owner applies the previewed transfer with typed confirmation and fresh 2FA');
+  assert.equal(appliedTransfer.job.status,'completed');
+  assert.ok(Number(appliedTransfer.job.result.created) > 0);
+  const copiedFaq = (await database.query(`SELECT id,status FROM faqs WHERE platform_id=(SELECT id FROM saas_platforms WHERE public_route_key=$1) AND question='Integration duplicate intent' AND deleted_at IS NULL`, [isolatedPlatform.public_route_key])).rows[0];
+  assert.ok(copiedFaq);
+  assert.equal(copiedFaq.status,'draft','Transferred FAQ must require destination review before publication');
+  const copiedGuide = (await database.query(`SELECT status FROM guides WHERE platform_id=(SELECT id FROM saas_platforms WHERE public_route_key=$1) AND slug='how-to-withdraw' AND deleted_at IS NULL`, [isolatedPlatform.public_route_key])).rows[0];
+  assert.equal(copiedGuide.status,'draft','Transferred Guide must require destination review before publication');
+  const purgedGrant = (await database.query(`SELECT status,manifest_ciphertext,manifest_checksum,manifest_purged_at FROM platform_transfer_grants WHERE public_id=$1::uuid`, [transferGrant.grant.id])).rows[0];
+  assert.equal(purgedGrant.status,'completed');
+  assert.equal(purgedGrant.manifest_ciphertext,'');
+  assert.equal(purgedGrant.manifest_checksum,'');
+  assert.ok(purgedGrant.manifest_purged_at);
+  assert.ok((await database.query(`SELECT id FROM faqs WHERE id=$1 AND platform_id=$2`, [createdFaq.id,platform.id])).rows[0], 'Source content must remain unchanged');
+
+  await database.query('UPDATE admin_users SET twofa_last_counter=NULL WHERE lower(email)=lower($1)', [env.ADMIN_EMAIL]);
+  const rolledBackTransfer = expectStatus(await call(`/admin/platform-transfers/jobs/${claimedTransfer.job.id}/rollback`, {
+    method:'POST',
+    platformRoute:isolatedPlatform.public_route_key,
+    body:{ confirmation:'ROLLBACK',twofa_code:await currentTotp(ownerSecret) },
+  }), 200, 'Destination owner rolls back within the seven-day recovery window');
+  assert.equal(rolledBackTransfer.job.status,'rolled_back');
+  assert.equal(Number((await database.query(`SELECT COUNT(*)::int AS count FROM faqs WHERE platform_id=(SELECT id FROM saas_platforms WHERE public_route_key=$1) AND question='Integration duplicate intent' AND deleted_at IS NULL`, [isolatedPlatform.public_route_key])).rows[0].count),0);
+
   const callsBeforeGreeting = providerRequestKinds.length;
   const promptGreeting = await submitAndCompleteChat({ message:'halo', language:'id', platform_key:platform.public_route_key, session_id:'integration-prompt-greeting' }, 'Queue and complete an Indonesian greeting through the active Prompt Manager runtime');
   assert.equal(promptGreeting.job.status, 'COMPLETED');
@@ -518,6 +571,7 @@ try {
   console.log('PASS Owner 2FA step-up, typed reset confirmation, force logout, session revocation, and security audit paths');
   console.log('PASS Required 2FA enrollment, encrypted secrets, TOTP replay and lockout protection, and backend Admin permission checks');
   console.log('PASS Multilingual Guide import creates one stable parent, preserves two locales, and keeps rich body content on re-import');
+  console.log('PASS Secure platform transfer uses encrypted one-time grants, preview, draft copy, source preservation, and rollback');
   console.log('PASS Rich HTML is sanitized in the API response and PostgreSQL row');
   console.log('PASS Private connector targets are rejected through the authenticated API');
   console.log('PASS Asynchronous HTTP 202 chat acknowledgement, durable worker completion, plain-text answers, approved images, and provider retry exhaustion paths');

@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
 
 async function toNodeBody(body) {
   if (body == null) return Buffer.alloc(0);
@@ -61,6 +61,10 @@ export function createR2Adapter(env, options = {}) {
         if (status === 404 || error?.name === 'NoSuchKey' || error?.name === 'NotFound') return null;
         throw error;
       }
+    },
+    async delete(key) {
+      await client.send(new DeleteObjectCommand({ Bucket: env.R2_BUCKET_NAME, Key: key }));
+      return true;
     },
     async health() {
       await client.send(new HeadBucketCommand({ Bucket: env.R2_BUCKET_NAME }));

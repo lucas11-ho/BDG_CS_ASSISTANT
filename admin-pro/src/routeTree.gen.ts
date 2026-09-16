@@ -16,6 +16,7 @@ import { Route as AdminUnmatchedQuestionsRouteImport } from './routes/_admin.unm
 import { Route as AdminThemeSettingsRouteImport } from './routes/_admin.theme-settings'
 import { Route as AdminSiteContentRouteImport } from './routes/_admin.site-content'
 import { Route as AdminPromptHistoryRouteImport } from './routes/_admin.prompt-history'
+import { Route as AdminPlatformTransferRouteImport } from './routes/_admin.platform-transfer'
 import { Route as AdminPlatformControlCenterRouteImport } from './routes/_admin.platform-control-center'
 import { Route as AdminLocaleStudioRouteImport } from './routes/_admin.locale-studio'
 import { Route as AdminHelpCardsRouteImport } from './routes/_admin.help-cards'
@@ -73,6 +74,11 @@ const AdminSiteContentRoute = AdminSiteContentRouteImport.update({
 const AdminPromptHistoryRoute = AdminPromptHistoryRouteImport.update({
   id: '/prompt-history',
   path: '/prompt-history',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminPlatformTransferRoute = AdminPlatformTransferRouteImport.update({
+  id: '/platform-transfer',
+  path: '/platform-transfer',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminPlatformControlCenterRoute =
@@ -224,6 +230,7 @@ export interface FileRoutesByFullPath {
   '/help-cards': typeof AdminHelpCardsRoute
   '/locale-studio': typeof AdminLocaleStudioRoute
   '/platform-control-center': typeof AdminPlatformControlCenterRoute
+  '/platform-transfer': typeof AdminPlatformTransferRoute
   '/prompt-history': typeof AdminPromptHistoryRoute
   '/site-content': typeof AdminSiteContentRoute
   '/theme-settings': typeof AdminThemeSettingsRoute
@@ -256,6 +263,7 @@ export interface FileRoutesByTo {
   '/help-cards': typeof AdminHelpCardsRoute
   '/locale-studio': typeof AdminLocaleStudioRoute
   '/platform-control-center': typeof AdminPlatformControlCenterRoute
+  '/platform-transfer': typeof AdminPlatformTransferRoute
   '/prompt-history': typeof AdminPromptHistoryRoute
   '/site-content': typeof AdminSiteContentRoute
   '/theme-settings': typeof AdminThemeSettingsRoute
@@ -290,6 +298,7 @@ export interface FileRoutesById {
   '/_admin/help-cards': typeof AdminHelpCardsRoute
   '/_admin/locale-studio': typeof AdminLocaleStudioRoute
   '/_admin/platform-control-center': typeof AdminPlatformControlCenterRoute
+  '/_admin/platform-transfer': typeof AdminPlatformTransferRoute
   '/_admin/prompt-history': typeof AdminPromptHistoryRoute
   '/_admin/site-content': typeof AdminSiteContentRoute
   '/_admin/theme-settings': typeof AdminThemeSettingsRoute
@@ -324,6 +333,7 @@ export interface FileRouteTypes {
     | '/help-cards'
     | '/locale-studio'
     | '/platform-control-center'
+    | '/platform-transfer'
     | '/prompt-history'
     | '/site-content'
     | '/theme-settings'
@@ -356,6 +366,7 @@ export interface FileRouteTypes {
     | '/help-cards'
     | '/locale-studio'
     | '/platform-control-center'
+    | '/platform-transfer'
     | '/prompt-history'
     | '/site-content'
     | '/theme-settings'
@@ -389,6 +400,7 @@ export interface FileRouteTypes {
     | '/_admin/help-cards'
     | '/_admin/locale-studio'
     | '/_admin/platform-control-center'
+    | '/_admin/platform-transfer'
     | '/_admin/prompt-history'
     | '/_admin/site-content'
     | '/_admin/theme-settings'
@@ -450,6 +462,13 @@ declare module '@tanstack/react-router' {
       path: '/prompt-history'
       fullPath: '/prompt-history'
       preLoaderRoute: typeof AdminPromptHistoryRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/platform-transfer': {
+      id: '/_admin/platform-transfer'
+      path: '/platform-transfer'
+      fullPath: '/platform-transfer'
+      preLoaderRoute: typeof AdminPlatformTransferRouteImport
       parentRoute: typeof AdminRoute
     }
     '/_admin/platform-control-center': {
@@ -648,6 +667,7 @@ interface AdminRouteChildren {
   AdminHelpCardsRoute: typeof AdminHelpCardsRoute
   AdminLocaleStudioRoute: typeof AdminLocaleStudioRoute
   AdminPlatformControlCenterRoute: typeof AdminPlatformControlCenterRoute
+  AdminPlatformTransferRoute: typeof AdminPlatformTransferRoute
   AdminPromptHistoryRoute: typeof AdminPromptHistoryRoute
   AdminSiteContentRoute: typeof AdminSiteContentRoute
   AdminThemeSettingsRoute: typeof AdminThemeSettingsRoute
@@ -679,6 +699,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminHelpCardsRoute: AdminHelpCardsRoute,
   AdminLocaleStudioRoute: AdminLocaleStudioRoute,
   AdminPlatformControlCenterRoute: AdminPlatformControlCenterRoute,
+  AdminPlatformTransferRoute: AdminPlatformTransferRoute,
   AdminPromptHistoryRoute: AdminPromptHistoryRoute,
   AdminSiteContentRoute: AdminSiteContentRoute,
   AdminThemeSettingsRoute: AdminThemeSettingsRoute,
