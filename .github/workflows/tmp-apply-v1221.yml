@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply stability patch
-        run: python scripts/tmp-apply-v1221.py
+        run: |
+          python scripts/tmp-apply-v1221.py
+          git checkout -- .github/workflows/ci.yml
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
