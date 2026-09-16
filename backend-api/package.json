@@ -49,7 +49,8 @@
     "test:v1200-cover-studio": "node scripts/v1.20.0-guide-cover-studio-regression-test.js",
     "test:v1202-admin-security": "node scripts/v1.20.2-admin-2fa-permissions-regression-test.js && node scripts/v1.21.0-localized-categories-analytics-regression-test.js",
     "test:v1210-localized-analytics": "node scripts/v1.21.0-localized-categories-analytics-regression-test.js",
-    "test:v1220-platform-transfer": "node scripts/v1.22.0-secure-platform-transfer-regression-test.js"
+    "test:v1220-platform-transfer": "node scripts/v1.22.0-secure-platform-transfer-regression-test.js",
+    "test:v1221-stability": "node scripts/v1.22.1-stability-performance-regression-test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1085.0",

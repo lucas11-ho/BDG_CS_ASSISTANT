@@ -18,7 +18,12 @@ function poolFor(env) {
 }
 
 async function q(env, text, params = []) {
-  return poolFor(env).query(text, params);
+  const started = Date.now();
+  try { return await poolFor(env).query(text, params); }
+  finally {
+    const duration = Date.now() - started;
+    if (duration >= 500) console.warn(JSON.stringify({ level:'warn', event:'slow_localized_content_query', duration_ms:duration, operation:String(text || '').trim().split(/\s+/)[0] || 'query' }));
+  }
 }
 
 export async function closeLocalizedContentAnalyticsPools() {
@@ -271,50 +276,73 @@ function rangeInterval(range) {
   return '7 days';
 }
 
+const analyticsSummaryCache = new Map();
+const analyticsSummaryFlights = new Map();
+const ANALYTICS_SUMMARY_TTL_MS = 15_000;
+
 export async function handleTrafficAdminRoute(request, env, scope) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '');
   if (request.method !== 'GET' || path !== '/admin/analytics/summary') return null;
-  const interval = rangeInterval(url.searchParams.get('range'));
-  const params = [scope.tenant_id, scope.platform_id];
-  const [active, todayVisitors, todayViews, sevenDayVisitors, rangeViews, topPages, locales, devices, minuteRows] = await Promise.all([
-    q(env, `SELECT COUNT(*)::int AS count FROM traffic_presence WHERE tenant_id=$1 AND platform_id=$2 AND last_seen_at >= NOW()-INTERVAL '2 minutes'`, params),
-    q(env, `SELECT COUNT(DISTINCT visitor_id)::int AS count FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= date_trunc('day',NOW())`, params),
-    q(env, `SELECT COUNT(*)::int AS count FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= date_trunc('day',NOW())`, params),
-    q(env, `SELECT COUNT(DISTINCT visitor_id)::int AS count FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= NOW()-INTERVAL '7 days'`, params),
-    q(env, `SELECT COUNT(*)::int AS count,COUNT(DISTINCT visitor_id)::int AS visitors FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= NOW()-($3::text)::interval`, [...params, interval]),
-    q(env, `SELECT path,COUNT(*)::int AS views,COUNT(DISTINCT visitor_id)::int AS visitors FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= NOW()-($3::text)::interval GROUP BY path ORDER BY views DESC,path ASC LIMIT 12`, [...params, interval]),
-    q(env, `SELECT locale,COUNT(*)::int AS views,COUNT(DISTINCT visitor_id)::int AS visitors FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= NOW()-($3::text)::interval GROUP BY locale ORDER BY views DESC LIMIT 12`, [...params, interval]),
-    q(env, `SELECT device_type,COUNT(*)::int AS views,COUNT(DISTINCT visitor_id)::int AS visitors FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= NOW()-($3::text)::interval GROUP BY device_type ORDER BY views DESC LIMIT 8`, [...params, interval]),
-    q(env, `SELECT created_at FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= NOW()-INTERVAL '30 minutes' ORDER BY created_at ASC`, params),
-  ]);
-  const now = Date.now();
-  const buckets = Array.from({ length: 6 }, (_, index) => ({
-    start: now - (5 - index) * 5 * 60_000,
-    label: new Date(now - (5 - index) * 5 * 60_000).toISOString(),
-    views: 0,
-  }));
-  for (const row of minuteRows.rows) {
-    const ts = new Date(row.created_at).getTime();
-    const age = now - ts;
-    const index = 5 - Math.min(5, Math.max(0, Math.floor(age / (5 * 60_000))));
-    if (buckets[index]) buckets[index].views += 1;
-  }
-  return json({
-    ok: true,
-    generated_at: new Date().toISOString(),
-    active_window_seconds: 120,
-    range: url.searchParams.get('range') || '7d',
-    active_now: Number(active.rows[0]?.count || 0),
-    visitors_today: Number(todayVisitors.rows[0]?.count || 0),
-    pageviews_today: Number(todayViews.rows[0]?.count || 0),
-    visitors_7d: Number(sevenDayVisitors.rows[0]?.count || 0),
-    range_pageviews: Number(rangeViews.rows[0]?.count || 0),
-    range_visitors: Number(rangeViews.rows[0]?.visitors || 0),
-    live_30m: buckets,
-    top_pages: topPages.rows,
-    locales: locales.rows,
-    devices: devices.rows,
-    privacy: { raw_ip_stored: false, visitor_identity: 'anonymous browser id' },
-  });
+  const range = url.searchParams.get('range') || '7d';
+  const interval = rangeInterval(range);
+  const cacheKey = `${scope.tenant_id}:${scope.platform_id}:${range}`;
+  const cached = analyticsSummaryCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < ANALYTICS_SUMMARY_TTL_MS) return json(cached.payload);
+  if (analyticsSummaryFlights.has(cacheKey)) return json(await analyticsSummaryFlights.get(cacheKey));
+
+  const flight = (async () => {
+    const started = Date.now();
+    const params = [scope.tenant_id, scope.platform_id];
+    const [metrics, topPages, locales, devices, minuteRows] = await Promise.all([
+      q(env, `SELECT
+        (SELECT COUNT(*)::int FROM traffic_presence WHERE tenant_id=$1 AND platform_id=$2 AND last_seen_at >= NOW()-INTERVAL '2 minutes') AS active_now,
+        COUNT(DISTINCT visitor_id) FILTER (WHERE created_at >= date_trunc('day',NOW()))::int AS visitors_today,
+        COUNT(*) FILTER (WHERE created_at >= date_trunc('day',NOW()))::int AS pageviews_today,
+        COUNT(DISTINCT visitor_id) FILTER (WHERE created_at >= NOW()-INTERVAL '7 days')::int AS visitors_7d,
+        COUNT(*) FILTER (WHERE created_at >= NOW()-($3::text)::interval)::int AS range_pageviews,
+        COUNT(DISTINCT visitor_id) FILTER (WHERE created_at >= NOW()-($3::text)::interval)::int AS range_visitors
+        FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview'`, [...params, interval]),
+      q(env, `SELECT path,COUNT(*)::int AS views,COUNT(DISTINCT visitor_id)::int AS visitors FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= NOW()-($3::text)::interval GROUP BY path ORDER BY views DESC,path ASC LIMIT 12`, [...params, interval]),
+      q(env, `SELECT locale,COUNT(*)::int AS views,COUNT(DISTINCT visitor_id)::int AS visitors FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= NOW()-($3::text)::interval GROUP BY locale ORDER BY views DESC LIMIT 12`, [...params, interval]),
+      q(env, `SELECT device_type,COUNT(*)::int AS views,COUNT(DISTINCT visitor_id)::int AS visitors FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= NOW()-($3::text)::interval GROUP BY device_type ORDER BY views DESC LIMIT 8`, [...params, interval]),
+      q(env, `SELECT created_at FROM traffic_events WHERE tenant_id=$1 AND platform_id=$2 AND event_type='pageview' AND created_at >= NOW()-INTERVAL '30 minutes' ORDER BY created_at ASC`, params),
+    ]);
+    const now = Date.now();
+    const buckets = Array.from({ length: 6 }, (_, index) => ({
+      start: now - (5 - index) * 5 * 60_000,
+      label: new Date(now - (5 - index) * 5 * 60_000).toISOString(),
+      views: 0,
+    }));
+    for (const row of minuteRows.rows) {
+      const ts = new Date(row.created_at).getTime();
+      const age = now - ts;
+      const index = 5 - Math.min(5, Math.max(0, Math.floor(age / (5 * 60_000))));
+      if (buckets[index]) buckets[index].views += 1;
+    }
+    const row = metrics.rows[0] || {};
+    const payload = {
+      ok: true,
+      generated_at: new Date().toISOString(),
+      active_window_seconds: 120,
+      range,
+      active_now: Number(row.active_now || 0),
+      visitors_today: Number(row.visitors_today || 0),
+      pageviews_today: Number(row.pageviews_today || 0),
+      visitors_7d: Number(row.visitors_7d || 0),
+      range_pageviews: Number(row.range_pageviews || 0),
+      range_visitors: Number(row.range_visitors || 0),
+      live_30m: buckets,
+      top_pages: topPages.rows,
+      locales: locales.rows,
+      devices: devices.rows,
+      privacy: { raw_ip_stored: false, visitor_identity: 'anonymous browser id' },
+    };
+    analyticsSummaryCache.set(cacheKey, { at: Date.now(), payload });
+    console.log(JSON.stringify({ level:'info', event:'analytics_summary_computed', tenant_id:scope.tenant_id, platform_id:scope.platform_id, range, query_count:5, duration_ms:Date.now()-started }));
+    return payload;
+  })();
+  analyticsSummaryFlights.set(cacheKey, flight);
+  try { return json(await flight); }
+  finally { analyticsSummaryFlights.delete(cacheKey); }
 }

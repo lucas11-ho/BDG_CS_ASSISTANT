@@ -39,7 +39,7 @@ import { api, getActiveAdminPlatformRoute, getCurrentUser, logout, setCurrentUse
 import AccountSecurityDrawer from "@/components/AccountSecurityDrawer";
 
 const { Sider, Header, Content } = Layout;
-const ADMIN_VERSION = "v1.22.0";
+const ADMIN_VERSION = "v1.22.1";
 
 const NAV: { key: string; to: string; label: string; icon: ReactNode; group?: string }[] = [
   {

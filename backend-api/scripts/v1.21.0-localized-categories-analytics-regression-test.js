@@ -67,8 +67,11 @@ for (const token of [
   'Top pages',
   'Languages',
   'Device mix',
-  '10_000',
+  '30_000',
+  'visibilitychange',
+  'inFlightRef',
 ]) assert.ok(analytics.includes(token), `missing analytics UX: ${token}`);
+assert.ok(!analytics.includes('setInterval(() => void load(true), 10_000)'), 'v1.22.1 must not restore overlapping 10-second analytics polling');
 assert.ok(layout.includes('key: "/analytics"'));
 assert.ok(layout.includes('group: "ANALYTICS"'));
 assert.ok(adminRouteTree.includes("./routes/_admin.analytics"), 'generated Admin route tree must include the analytics route');
@@ -87,4 +90,4 @@ for (const token of [
 assert.ok(publicRoot.includes('trackPublicPageView()'));
 assert.ok(publicRoot.includes('startPublicTrafficHeartbeat()'));
 
-console.log('v1.21.0 localized categories and privacy-first traffic analytics regression contract passed.');
+console.log('v1.21.0 localized categories and privacy-first traffic analytics regression contract passed with v1.22.1 stability refresh controls.');
