@@ -72,7 +72,7 @@ assert.ok(route.includes('Motion media cover / custom override'));
 assert.ok(publicApi.includes('tr?.cover_image_url || row?.cover_image_url'));
 
 assert.ok(faqRoute.includes('FAQ Management'));
-assert.ok(faqRoute.includes('Search question, answer, keywords or topic'));
+assert.ok(faqRoute.includes('Search question, answer, keywords or FAQ topic'));
 assert.ok(faqRoute.includes('rowSelection'));
 assert.ok(faqRoute.includes('Select all'));
 assert.ok(faqRoute.includes('Publish selected'));
