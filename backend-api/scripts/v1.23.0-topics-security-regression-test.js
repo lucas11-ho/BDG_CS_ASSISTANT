@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 // v1.23 security and Guide multi-topic behavior must remain compatible while
-// v1.24 intentionally returns FAQ to exactly one Topic.
+// FAQ uses one independent localized text Topic.
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const migration = read('../migrations/055_v1.23.0_topics_security_control.sql');
 const core = read('../src/core.js');
@@ -79,9 +79,11 @@ assert.match(guide, /name="primary_topic_id"/);
 assert.match(guide, /mode="multiple"/);
 assert.match(guide, /topic\.is_primary/);
 
-// v1.24 intentionally replaces FAQ multi-topic UI with one Topic.
-assert.match(faq, /name="topic_id"/);
+// FAQ keeps exactly one localized Topic, independent from Guide categories.
+assert.match(faq, /name="topic" label="FAQ Topic"/);
+assert.match(faq, /FAQ Topics are independent from Guide Topics\/Categories/);
+assert.doesNotMatch(faq, /name="topic_id"/);
 assert.doesNotMatch(faq, /name="topic_ids"/);
 assert.doesNotMatch(faq, /name="primary_topic_id"/);
 
-console.log('v1.23 security + Guide multi-topic compatibility checks passed under v1.24');
+console.log('v1.23 security + Guide multi-topic compatibility checks passed with independent FAQ Topic');
