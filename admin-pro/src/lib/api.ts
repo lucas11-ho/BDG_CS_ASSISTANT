@@ -307,6 +307,7 @@ function normalizeForCreate(resource: string, data: any): any {
       primary_topic_id: data.primary_topic_id || data.category_id || null,
       topic_ids: Array.isArray(data.topic_ids) ? data.topic_ids : [],
       topic_slugs: Array.isArray(data.topic_slugs) ? data.topic_slugs : [],
+      tag_ids: Array.isArray(data.tag_ids) ? data.tag_ids : String(data.tag_ids || "").split(/\r?\n|,/).map((x) => Number(x.trim())).filter(Boolean),
       category_slug: data.category_slug || data.category || "",
       button_ids: Array.isArray(data.button_ids) ? data.button_ids : String(data.button_ids || "").split(/\r?\n|,/).map((x) => Number(x.trim())).filter(Boolean),
     };
@@ -314,6 +315,9 @@ function normalizeForCreate(resource: string, data: any): any {
   if (resource === "faq") {
     return {
       question: data.question,
+      slug: data.slug || "",
+      topic: String(data.topic || "General").trim() || "General",
+      tag_ids: Array.isArray(data.tag_ids) ? data.tag_ids : String(data.tag_ids || "").split(/\r?\n|,/).map((x) => Number(x.trim())).filter(Boolean),
       answer: data.answer || data.value || "",
       answer_html: data.answer_html || "",
       answer_json: data.answer_json || "",
