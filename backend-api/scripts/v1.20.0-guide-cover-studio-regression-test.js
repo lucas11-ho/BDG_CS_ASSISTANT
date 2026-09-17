@@ -71,7 +71,7 @@ assert.ok(route.includes('cover_media_type: \"image\", cover_image_url: url'));
 assert.ok(route.includes('Motion media cover / custom override'));
 assert.ok(publicApi.includes('tr?.cover_image_url || row?.cover_image_url'));
 
-assert.ok(faqRoute.includes('FAQ Management v2'));
+assert.ok(faqRoute.includes('FAQ Management'));
 assert.ok(faqRoute.includes('Search question, answer, keywords or topic'));
 assert.ok(faqRoute.includes('rowSelection'));
 assert.ok(faqRoute.includes('Select all'));
@@ -80,5 +80,7 @@ assert.ok(faqRoute.includes('Move to draft'));
 assert.ok(faqRoute.includes('Delete selected'));
 assert.ok(faqRoute.includes('bulkSetStatus'));
 assert.ok(faqRoute.includes('bulkDelete'));
+assert.ok(faqRoute.includes('Stable slug'));
+assert.ok(faqRoute.includes('name="tag_ids" label="Tags"'));
 
 console.log('Guide Cover Builder v3 live-template regression contract passed.');

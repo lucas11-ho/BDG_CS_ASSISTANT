@@ -139,6 +139,7 @@ const resourcePath: Record<string, string> = {
   "help-cards": "/admin/popular-help",
   "popular-help": "/admin/popular-help",
   categories: "/admin/categories",
+  tags: "/admin/tags",
   "guide-images": "/admin/guides",
   guides: "/admin/guides",
   faq: "/admin/faqs",

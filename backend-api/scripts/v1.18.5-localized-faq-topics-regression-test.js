@@ -44,14 +44,16 @@ await test('Legacy API clients that omit Topic do not erase a saved Topic', asyn
   assert.ok(source.includes('if (!response?.ok || topic == null) return'));
 });
 
-await test('Admin preserves localized Topic compatibility while exposing multi-topic management and Excel preview', async () => {
+await test('Admin preserves localized Topic compatibility while enforcing one Topic and separate Tags', async () => {
   const page = fs.readFileSync(new URL('../../admin-pro/src/routes/_admin.faq.tsx', import.meta.url), 'utf8');
   const toolbar = fs.readFileSync(new URL('../../admin-pro/src/components/BulkContentRouteToolbar.tsx', import.meta.url), 'utf8');
-  assert.ok(page.includes('name="primary_topic_id" label="Primary topic"'));
-  assert.ok(page.includes('name="topic_ids" label="Topics"'));
-  assert.ok(page.includes('mode="multiple"'));
+  assert.ok(page.includes('name="topic_id" label="Topic"'));
+  assert.ok(page.includes('Each FAQ belongs to one Topic only.'));
+  assert.ok(!page.includes('name="topic_ids" label="Topics"'));
+  assert.ok(!page.includes('name="primary_topic_id" label="Primary topic"'));
+  assert.ok(page.includes('name="tag_ids" label="Tags"'));
+  assert.ok(page.includes('Manage your own Tags from Content → Tags.'));
   assert.ok(page.includes('name="topic" hidden'));
-  assert.ok(page.includes('topic: String(values.topic || "General").trim() || "General"'));
   assert.ok(toolbar.includes('Topic is locale-specific, so use the same language as each FAQ row.'));
   assert.match(toolbar, /title:\s*(?:t\()?['"]Topic['"]\)?\s*,\s*dataIndex:\s*['"]topic['"]/);
 });
@@ -70,7 +72,7 @@ await test('Runtime enriches FAQ responses so Guide grouping uses localized Topi
 
 await test('Production release marker advances to localized FAQ topics', async () => {
   const server = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
-  assert.ok(server.includes("const API_VERSION = '1.23.0-topics-security-control'"));
+  assert.ok(server.includes("const API_VERSION = '1.24.0-content-taxonomy-stable-faq-slugs'"));
   assert.ok(server.includes("'localized-faq-topics'"));
   assert.ok(server.includes("'faq-topic-excel-import-export'"));
 });

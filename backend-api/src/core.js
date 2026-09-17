@@ -48,7 +48,7 @@ const { Pool } = pg;
 const scryptAsync = promisify(scryptCallback);
 const pools = new Map();
 
-const VERSION = '1.23.0-topics-security-control';
+const VERSION = '1.24.0-content-taxonomy-stable-faq-slugs';
 
 const ADMIN_PERMISSION_CATALOG = Object.freeze([
   'dashboard.view',
@@ -1151,7 +1151,7 @@ function guideOut(row, lang='en') {
     },
   };
 }
-function faqOut(row) { return { id: row.id, question: row.question, answer: row.answer, answer_html: sanitizeRichHtml(row.answer_html || ''), answer_json: row.answer_json || '', image_urls: splitUrls(row.image_urls), locale: row.locale || 'en', keywords: row.keywords || '', priority: row.priority ?? 100, status: row.status || 'published' }; }
+function faqOut(row) { return { id: row.id, slug: row.slug || '', topic_id: row.topic_id == null ? null : Number(row.topic_id), question: row.question, answer: row.answer, answer_html: sanitizeRichHtml(row.answer_html || ''), answer_json: row.answer_json || '', image_urls: splitUrls(row.image_urls), locale: row.locale || 'en', keywords: row.keywords || '', priority: row.priority ?? 100, status: row.status || 'published' }; }
 function knowledgeOut(row) { return { id: row.id, title: row.title, content: row.content, keywords: row.keywords || '', priority: row.priority ?? 100, status: row.status || 'active' }; }
 function promptOut(row) { const content = row.content || ''; return { id: row.id, section_key: row.section_key, title: row.title, content, enabled: !!row.enabled, priority: row.priority ?? 100, content_characters:content.length, updated_at: String(row.updated_at || '') }; }
 function normalizeDeepSeekModel(value) {
