@@ -11,8 +11,7 @@ ALTER TABLE faqs
 
 -- Preserve the v1.23 primary FAQ topic when one exists.
 UPDATE faqs f
-SET topic_id = picked.category_id
-FROM LATERAL (
+SET topic_id = (
   SELECT ft.category_id
   FROM faq_topics ft
   JOIN categories c ON c.id=ft.category_id
@@ -24,14 +23,14 @@ FROM LATERAL (
     AND c.deleted_at IS NULL
   ORDER BY ft.is_primary DESC,ft.sort_order ASC,ft.category_id ASC
   LIMIT 1
-) picked
-WHERE f.topic_id IS NULL;
+)
+WHERE f.topic_id IS NULL
+  AND EXISTS (SELECT 1 FROM faq_topics ft WHERE ft.faq_id=f.id);
 
 -- If v1.23 had no relationship, resolve the existing localized topic text
 -- against the category slug or name without creating or merging categories.
 UPDATE faqs f
-SET topic_id = picked.id
-FROM LATERAL (
+SET topic_id = (
   SELECT c.id
   FROM categories c
   WHERE c.tenant_id=f.tenant_id
@@ -43,9 +42,16 @@ FROM LATERAL (
     )
   ORDER BY CASE WHEN lower(c.slug)=lower(trim(COALESCE(f.topic,''))) THEN 0 ELSE 1 END,c.id
   LIMIT 1
-) picked
+)
 WHERE f.topic_id IS NULL
-  AND COALESCE(trim(f.topic),'')<>'';
+  AND COALESCE(trim(f.topic),'')<>''
+  AND EXISTS (
+    SELECT 1 FROM categories c
+    WHERE c.tenant_id=f.tenant_id
+      AND c.platform_id=f.platform_id
+      AND c.deleted_at IS NULL
+      AND (lower(c.slug)=lower(trim(f.topic)) OR lower(c.name)=lower(trim(f.topic)))
+  );
 
 -- faq_topics remains only as a backwards-compatible one-row mirror.
 DELETE FROM faq_topics ft
@@ -68,7 +74,12 @@ WHERE f.topic_id IS NOT NULL
 ON CONFLICT(faq_id,category_id) DO UPDATE
 SET is_primary=TRUE,sort_order=0,updated_at=NOW();
 
--- Generate stable slugs for every old FAQ that does not have one.
+-- Enforce exactly one FAQ Topic even for older compatibility writers.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_faq_topics_one_topic
+  ON faq_topics(faq_id);
+
+-- Generate stable slugs for every old FAQ that does not have one. English-like
+-- questions use a readable slug; other scripts safely fall back to faq-{id}.
 WITH base AS (
   SELECT id,
          tenant_id,
