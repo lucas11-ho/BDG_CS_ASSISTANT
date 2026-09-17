@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ArrowLeft, Calendar, Info, AlertTriangle, LifeBuoy, ArrowRight, Loader2, ExternalLink } from "lucide-react";
 import { api, getPlatformCacheKey, getPublicLanguage } from "@/lib/api";
+import { getGuideWithTags } from "@/lib/guide-tags";
 import type { GuideBlock } from "@/mock/data";
 import { Button } from "@/components/ui/button";
 import { ServiceErrorPanel } from "@/components/public/ServiceErrorPanel";
@@ -78,7 +79,7 @@ function GuideDetail() {
 
   const { data: guide, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["guide", platformKey, slug, lang],
-    queryFn: () => api.getGuide(slug),
+    queryFn: () => getGuideWithTags(slug),
   });
   const { data: allGuides } = useQuery({ queryKey: ["guides", platformKey, lang], queryFn: () => api.getGuides() });
   const { data: allFaqs } = useQuery({ queryKey: ["faqs", platformKey, lang], queryFn: api.getFaqs });
@@ -152,7 +153,14 @@ function GuideDetail() {
           </div>
         )}
         <div className="space-y-4 p-5 md:p-7">
-          <Badge className="bg-[color:var(--bdg-navy)] text-white uppercase tracking-wide">{guide.category}</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className="bg-[color:var(--bdg-navy)] text-white uppercase tracking-wide">{guide.category}</Badge>
+            {guide.tags.map((tag) => (
+              <Badge key={tag.id || tag.slug} variant="outline" style={tag.color ? { borderColor: tag.color, color: tag.color } : undefined}>
+                {tag.name}
+              </Badge>
+            ))}
+          </div>
           <div>
             <h1 className={`font-display text-3xl font-black leading-tight tracking-tight md:text-5xl ${motionClass(guide.motion?.titleAnimation, motionEnabled, motionIntensity)}`}>{guide.title}</h1>
             {guide.summary && <p className={`mt-3 max-w-3xl text-base leading-7 text-muted-foreground md:text-lg ${motionClass(guide.motion?.summaryAnimation, motionEnabled, motionIntensity)}`}>{guide.summary}</p>}
