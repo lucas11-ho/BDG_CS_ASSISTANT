@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Search, X, Filter, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { api, getPlatformCacheKey } from "@/lib/api";
+import { getGuidesWithTags } from "@/lib/guide-tags";
 import { getPlatformGuideExperience, guideShellCopy } from "@/lib/platform-guide-content";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +44,7 @@ function GuidesIndex() {
   const cats = useQuery({ queryKey: ["categories", platformKey], queryFn: api.getCategories });
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["guides", platformKey, q, category, lang],
-    queryFn: () => api.getGuides({ q, category }),
+    queryFn: () => getGuidesWithTags({ q, category }),
   });
 
   return (
@@ -127,7 +128,14 @@ function GuidesIndex() {
           >
             {guide.cover ? <div className="h-28 w-28 shrink-0 overflow-hidden bg-muted"><img src={guide.cover} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" /></div> : null}
             <div className="min-w-0 flex-1 p-3">
-              <Badge variant="secondary" className="text-[10px] uppercase">{guide.category}</Badge>
+              <div className="flex flex-wrap items-center gap-1">
+                <Badge variant="secondary" className="text-[10px] uppercase">{guide.category}</Badge>
+                {guide.tags.map((tag) => (
+                  <Badge key={tag.id || tag.slug} variant="outline" className="text-[10px]" style={tag.color ? { borderColor: tag.color, color: tag.color } : undefined}>
+                    {tag.name}
+                  </Badge>
+                ))}
+              </div>
               <h3 className="mt-1 line-clamp-1 font-display text-sm font-semibold">{guide.title}</h3>
               <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{guide.summary}</p>
               <div className="mt-2 text-[10px] text-muted-foreground">{copy?.guidesUpdatedLabel || "Updated"} {guide.updatedAt}</div>
