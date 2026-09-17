@@ -25,7 +25,7 @@ import {
   handleFaqTopicBulkRoute,
   persistFaqTopicFromResponse,
 } from './faq-topics.js';
-import { closeMultiTopicPools, enrichTopicsResponse, syncTopicsFromResponse } from './multi-topics.js';
+import { closeMultiTopicPools, enrichContentTaxonomyResponse, enrichTopicsResponse, handleTagAdminRoute, syncContentTaxonomyFromResponse, syncTopicsFromResponse } from './multi-topics.js';
 import {
   closeLocalizedContentAnalyticsPools,
   enrichCategoryListResponse,
@@ -35,8 +35,13 @@ import {
 } from './localized-categories-analytics.js';
 
 const env = getRuntimeEnv();
-const API_VERSION = '1.23.0-topics-security-control';
+const API_VERSION = '1.24.0-content-taxonomy-stable-faq-slugs';
 const API_FEATURES = [
+  'faq-stable-slugs',
+  'faq-single-topic',
+  'managed-content-tags',
+  'guide-tags',
+  'faq-tags',
   'multi-topic-content',
   'membership-scoped-permissions',
   'platform-twofa-policy',
@@ -322,6 +327,11 @@ async function authenticatedContentAnalyticsResponse(request, env, url, path, re
     if (denied(permission)) return new Response(JSON.stringify({ ok:false,error:`Administrator permission required: ${permission}`,code:'ADMIN_PERMISSION_DENIED' }), { status:403,headers:{ 'Content-Type':'application/json; charset=utf-8' } });
     return handleCategoryLocaleAdminRoute(request, env, scope);
   }
+  if (path.startsWith('/admin/tags')) {
+    const permission = isWrite ? 'content.manage' : 'content.view';
+    if (denied(permission)) return new Response(JSON.stringify({ ok:false,error:`Administrator permission required: ${permission}`,code:'ADMIN_PERMISSION_DENIED' }), { status:403,headers:{ 'Content-Type':'application/json; charset=utf-8' } });
+    return handleTagAdminRoute(request, env, scope);
+  }
   return null;
 }
 
@@ -366,6 +376,8 @@ const server = http.createServer(async (req, res) => {
       path === '/admin/analytics/summary'
       || path === '/admin/categories/locales'
       || /^\/admin\/categories\/\d+\/translations(?:\/[^/]+)?$/.test(path)
+      || path === '/admin/tags'
+      || /^\/admin\/tags\/\d+$/.test(path)
     );
     let response = isTrafficWrite
       ? await handleTrafficPublicRoute(request, env)
@@ -375,6 +387,11 @@ const server = http.createServer(async (req, res) => {
           ? await authenticatedBulkResponse(request, env, url, path, requestHeaders, requestAbort.signal)
           : await api.fetch(request, env);
     if (!response) throw Object.assign(new Error('Bulk content route was not found'), { status: 404 });
+    let contentBody = {};
+    if (body && String(req.headers['content-type'] || '').toLowerCase().includes('application/json')) {
+      try { contentBody = JSON.parse(Buffer.from(body).toString('utf8')); }
+      catch { contentBody = {}; }
+    }
 
     const isFaqWrite = response.ok && ((method === 'POST' && path === '/admin/faqs') || (method === 'PUT' && /^\/admin\/faqs\/\d+$/.test(path)));
     const isFaqRead = response.ok && method === 'GET' && (path === '/admin/faqs' || path === '/faqs' || path === '/public/faqs');
@@ -382,18 +399,21 @@ const server = http.createServer(async (req, res) => {
     const isGuideRead = response.ok && method === 'GET' && (path === '/admin/guides' || path === '/guides' || path === '/public/guides' || /^\/guides\/[^/]+$/.test(path));
     if (isFaqWrite) {
       await persistFaqTopicFromResponse(response, env, faqTopicFromJsonBody(body));
-      response = await syncTopicsFromResponse(response, env, 'faq', body || {});
+      response = await syncContentTaxonomyFromResponse(response, env, 'faq', contentBody);
       response = await enrichFaqTopicResponse(response, env);
-      response = await enrichTopicsResponse(response, env, 'faq');
+      response = await enrichContentTaxonomyResponse(response, env, 'faq');
     } else if (isFaqRead) {
       response = await enrichFaqTopicResponse(response, env);
-      response = await enrichTopicsResponse(response, env, 'faq');
+      response = await enrichContentTaxonomyResponse(response, env, 'faq');
     }
     if (isGuideWrite) {
-      response = await syncTopicsFromResponse(response, env, 'guide', body || {});
+      response = await syncTopicsFromResponse(response, env, 'guide', contentBody);
+      response = await syncContentTaxonomyFromResponse(response, env, 'guide', contentBody);
       response = await enrichTopicsResponse(response, env, 'guide');
+      response = await enrichContentTaxonomyResponse(response, env, 'guide');
     } else if (isGuideRead) {
       response = await enrichTopicsResponse(response, env, 'guide');
+      response = await enrichContentTaxonomyResponse(response, env, 'guide');
     }
     const isCategoryListRead = response.ok && method === 'GET' && (path === '/admin/categories' || path === '/categories' || path === '/public/categories');
     if (isCategoryListRead) {

@@ -18,9 +18,9 @@ const backendPackage=JSON.parse(read('backend-api/package.json'));
 const checks=[];
 const expect=(name,condition)=>checks.push([name,Boolean(condition)]);
 
-expect('v1.17.1 features remain active on the current runtime',core.includes('1.23.0-topics-security-control')&&server.includes('1.23.0-topics-security-control'));
+expect('v1.17.1 features remain active on the current runtime',core.includes('1.24.0-content-taxonomy-stable-faq-slugs')&&server.includes('1.24.0-content-taxonomy-stable-faq-slugs'));
 expect('backend package version is current v1.18.0',backendPackage.version==='1.18.0');
-expect('Admin displays current v1.23.0',adminLayout.includes('const ADMIN_VERSION = "v1.23.0"'));
+expect('Admin displays current v1.24.0',adminLayout.includes('const ADMIN_VERSION = "v1.24.0"'));
 expect('migration 044 adds explicit CORS policy fields',migration.includes('cors_allowed BOOLEAN NOT NULL DEFAULT TRUE')&&migration.includes('cors_activated_at TIMESTAMPTZ'));
 expect('migration 044 indexes only active allowed custom origins',migration.includes('idx_platform_domains_dynamic_cors')&&migration.includes("cors_allowed IS TRUE")&&migration.includes("provisioning_status = 'active'"));
 expect('custom-domain CORS requires exact HTTPS origin',core.includes("url.protocol !== 'https:'")&&core.includes('url.port')&&core.includes("url.pathname !== '/'")&&core.includes('`https://${hostname}`'));

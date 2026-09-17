@@ -14,6 +14,7 @@ import { Route as AdminRouteImport } from './routes/_admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminUnmatchedQuestionsRouteImport } from './routes/_admin.unmatched-questions'
 import { Route as AdminThemeSettingsRouteImport } from './routes/_admin.theme-settings'
+import { Route as AdminTagsRouteImport } from './routes/_admin.tags'
 import { Route as AdminSiteContentRouteImport } from './routes/_admin.site-content'
 import { Route as AdminSecurityPermissionsRouteImport } from './routes/_admin.security-permissions'
 import { Route as AdminPromptHistoryRouteImport } from './routes/_admin.prompt-history'
@@ -65,6 +66,11 @@ const AdminUnmatchedQuestionsRoute = AdminUnmatchedQuestionsRouteImport.update({
 const AdminThemeSettingsRoute = AdminThemeSettingsRouteImport.update({
   id: '/theme-settings',
   path: '/theme-settings',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminTagsRoute = AdminTagsRouteImport.update({
+  id: '/tags',
+  path: '/tags',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminSiteContentRoute = AdminSiteContentRouteImport.update({
@@ -241,6 +247,7 @@ export interface FileRoutesByFullPath {
   '/prompt-history': typeof AdminPromptHistoryRoute
   '/security-permissions': typeof AdminSecurityPermissionsRoute
   '/site-content': typeof AdminSiteContentRoute
+  '/tags': typeof AdminTagsRoute
   '/theme-settings': typeof AdminThemeSettingsRoute
   '/unmatched-questions': typeof AdminUnmatchedQuestionsRoute
 }
@@ -275,6 +282,7 @@ export interface FileRoutesByTo {
   '/prompt-history': typeof AdminPromptHistoryRoute
   '/security-permissions': typeof AdminSecurityPermissionsRoute
   '/site-content': typeof AdminSiteContentRoute
+  '/tags': typeof AdminTagsRoute
   '/theme-settings': typeof AdminThemeSettingsRoute
   '/unmatched-questions': typeof AdminUnmatchedQuestionsRoute
 }
@@ -311,6 +319,7 @@ export interface FileRoutesById {
   '/_admin/prompt-history': typeof AdminPromptHistoryRoute
   '/_admin/security-permissions': typeof AdminSecurityPermissionsRoute
   '/_admin/site-content': typeof AdminSiteContentRoute
+  '/_admin/tags': typeof AdminTagsRoute
   '/_admin/theme-settings': typeof AdminThemeSettingsRoute
   '/_admin/unmatched-questions': typeof AdminUnmatchedQuestionsRoute
 }
@@ -347,6 +356,7 @@ export interface FileRouteTypes {
     | '/prompt-history'
     | '/security-permissions'
     | '/site-content'
+    | '/tags'
     | '/theme-settings'
     | '/unmatched-questions'
   fileRoutesByTo: FileRoutesByTo
@@ -381,6 +391,7 @@ export interface FileRouteTypes {
     | '/prompt-history'
     | '/security-permissions'
     | '/site-content'
+    | '/tags'
     | '/theme-settings'
     | '/unmatched-questions'
   id:
@@ -416,6 +427,7 @@ export interface FileRouteTypes {
     | '/_admin/prompt-history'
     | '/_admin/security-permissions'
     | '/_admin/site-content'
+    | '/_admin/tags'
     | '/_admin/theme-settings'
     | '/_admin/unmatched-questions'
   fileRoutesById: FileRoutesById
@@ -461,6 +473,13 @@ declare module '@tanstack/react-router' {
       path: '/theme-settings'
       fullPath: '/theme-settings'
       preLoaderRoute: typeof AdminThemeSettingsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/tags': {
+      id: '/_admin/tags'
+      path: '/tags'
+      fullPath: '/tags'
+      preLoaderRoute: typeof AdminTagsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/_admin/site-content': {
@@ -691,6 +710,7 @@ interface AdminRouteChildren {
   AdminPromptHistoryRoute: typeof AdminPromptHistoryRoute
   AdminSecurityPermissionsRoute: typeof AdminSecurityPermissionsRoute
   AdminSiteContentRoute: typeof AdminSiteContentRoute
+  AdminTagsRoute: typeof AdminTagsRoute
   AdminThemeSettingsRoute: typeof AdminThemeSettingsRoute
   AdminUnmatchedQuestionsRoute: typeof AdminUnmatchedQuestionsRoute
 }
@@ -724,6 +744,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminPromptHistoryRoute: AdminPromptHistoryRoute,
   AdminSecurityPermissionsRoute: AdminSecurityPermissionsRoute,
   AdminSiteContentRoute: AdminSiteContentRoute,
+  AdminTagsRoute: AdminTagsRoute,
   AdminThemeSettingsRoute: AdminThemeSettingsRoute,
   AdminUnmatchedQuestionsRoute: AdminUnmatchedQuestionsRoute,
 }
