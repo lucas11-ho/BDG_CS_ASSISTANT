@@ -40,8 +40,7 @@ function faqUpdatePayload(row: any, status?: string) {
     image_urls: Array.isArray(row.image_urls) ? row.image_urls : [],
     locale: row.locale || "en",
     slug: row.slug || "",
-    topic: String(row.topic || row.category || "General").trim() || "General",
-    topic_id: row.topic_id || row.primary_topic_id || row.category_id || null,
+    topic: String(row.topic || "General").trim() || "General",
     tag_ids: Array.isArray(row.tag_ids) ? row.tag_ids : [],
     keywords: row.keywords || "",
     priority: Number(row.priority || 100),
@@ -57,7 +56,6 @@ async function inChunks<T>(items: T[], size: number, worker: (item: T) => Promis
 
 function FaqStudioPage() {
   const [rows, setRows] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
   const [tags, setTags] = useState<any[]>([]);
   const [editing, setEditing] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -79,14 +77,12 @@ function FaqStudioPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [faqRows, registry, categoryRows, tagRows] = await Promise.all([
+      const [faqRows, registry, tagRows] = await Promise.all([
         api.list("faq") as Promise<any[]>,
         api.getLocaleRegistry(),
-        api.list("categories") as Promise<any[]>,
         api.list("tags") as Promise<any[]>,
       ]);
       setRows(faqRows || []);
-      setCategories(categoryRows || []);
       setTags(tagRows || []);
       const options = Array.isArray(registry?.locales)
         ? registry.locales.map((locale: any) => ({ value: String(locale.code), label: `${String(locale.code).toUpperCase()} — ${locale.label || locale.code}` }))
@@ -100,17 +96,17 @@ function FaqStudioPage() {
   };
   useEffect(() => { void load(); }, []);
 
-  const topicOptions = useMemo(() => [...new Set(rows.map((row) => String(row.topic || row.category || "General").trim() || "General"))]
+  const topicOptions = useMemo(() => [...new Set(rows.map((row) => String(row.topic || "General").trim() || "General"))]
     .sort((a, b) => a.localeCompare(b))
     .map((value) => ({ value, label: value })), [rows]);
 
   const filteredRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return rows.filter((row) => {
-      const matchesSearch = !needle || [row.question, row.slug, row.answer, row.keywords, row.topic, row.category, ...(row.tags || []).flatMap((tag: any) => [tag.name, tag.slug])]
+      const matchesSearch = !needle || [row.question, row.slug, row.answer, row.keywords, row.topic, ...(row.tags || []).flatMap((tag: any) => [tag.name, tag.slug])]
         .some((value) => String(value || "").toLowerCase().includes(needle));
       const matchesLocale = !localeFilter || String(row.locale || "en") === localeFilter;
-      const topic = String(row.topic || row.category || "General").trim() || "General";
+      const topic = String(row.topic || "General").trim() || "General";
       const matchesTopic = !topicFilter || topic === topicFilter;
       const matchesTag = !tagFilter || (row.tag_ids || []).map(Number).includes(Number(tagFilter));
       const matchesStatus = !statusFilter || String(row.status || "draft") === statusFilter;
@@ -124,12 +120,12 @@ function FaqStudioPage() {
   }, [rows, selectedRowKeys]);
 
   const openEditor = (item?: any) => {
-    const current = item || { question: "", slug: "", topic: "General", topic_id: null, tag_ids: [], locale: defaultLocale || localeOptions[0]?.value || "en", status: "published", priority: 100, keywords: "" };
+    const current = item || { question: "", slug: "", topic: "General", tag_ids: [], locale: defaultLocale || localeOptions[0]?.value || "en", status: "published", priority: 100, keywords: "" };
     setEditing(current);
     setAnswerJson(current.answer_json || blankDoc);
     setAnswerHtml(current.answer_html || "");
     setImageUrls(Array.isArray(current.image_urls) ? current.image_urls : []);
-    form.setFieldsValue({ ...current, slug: current.slug || "", topic: current.topic || current.category || "General", topic_id: current.topic_id || current.primary_topic_id || current.category_id || null, tag_ids: current.tag_ids || [] });
+    form.setFieldsValue({ ...current, slug: current.slug || "", topic: current.topic || "General", tag_ids: current.tag_ids || [] });
   };
   const closeEditor = () => { setEditing(null); form.resetFields(); setAnswerJson(blankDoc); setAnswerHtml(""); setImageUrls([]); };
   const uploadImage = async (file: File) => (await api.upload(file)).url;
@@ -142,8 +138,7 @@ function FaqStudioPage() {
     try {
       const values = await form.validateFields();
       setSaving(true);
-      const selectedTopic = categories.find((category) => Number(category.id) === Number(values.topic_id));
-      const payload = { ...values, slug: String(values.slug || "").trim(), topic_id: values.topic_id || null, topic: selectedTopic?.name || String(values.topic || "General").trim() || "General", tag_ids: values.tag_ids || [], answer: answerHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(), answer_html: answerHtml, answer_json: answerJson, image_urls: imageUrls };
+      const payload = { ...values, slug: String(values.slug || "").trim(), topic: String(values.topic || "General").trim() || "General", tag_ids: values.tag_ids || [], answer: answerHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(), answer_html: answerHtml, answer_json: answerJson, image_urls: imageUrls };
       if (editing?.id) await api.update("faq", editing.id, payload); else await api.create("faq", payload);
       message.success(editing?.id ? "FAQ updated" : "FAQ created"); closeEditor(); await load();
     } catch (error: any) { if (error?.errorFields) return; message.error(error?.message || "Could not save FAQ"); }
@@ -180,7 +175,7 @@ function FaqStudioPage() {
     { title: "Question", dataIndex: "question", render: (value: string) => <b>{value}</b> },
     { title: "Stable slug", dataIndex: "slug", width: 190, render: (value: string) => <code>{value || "—"}</code> },
     { title: "Locale", dataIndex: "locale", width: 100, render: (value: string) => <Tag>{String(value || "en").toUpperCase()}</Tag> },
-    { title: "Topic", width: 170, render: (_: any, row: any) => <Tag color="blue">{row.topic || row.category || "General"}</Tag> },
+    { title: "FAQ Topic", width: 170, render: (_: any, row: any) => <Tag color="blue">{row.topic || "General"}</Tag> },
     { title: "Tags", width: 220, render: (_: any, row: any) => <Space wrap>{(row.tags || []).map((tag: any) => <Tag key={`${row.id}-tag-${tag.id}`} color={tag.color || "blue"}>{tag.name || tag.slug}</Tag>)}</Space> },
     { title: "Answer", dataIndex: "answer", ellipsis: true },
     { title: "Status", dataIndex: "status", width: 115, render: (value: string) => <Tag color={value === "published" ? "green" : value === "archived" ? "default" : "gold"}>{value || "draft"}</Tag> },
@@ -188,12 +183,12 @@ function FaqStudioPage() {
   ], []);
 
   return <>
-    <Alert showIcon type="info" message="FAQ Management" description="Each FAQ has one Topic, one stable slug, and any number of independent Tags. Search, filter and bulk-manage FAQs without merging Topics together." style={{ marginBottom: 12 }} />
+    <Alert showIcon type="info" message="FAQ Management" description="Each FAQ has one localized Topic that is independent from Guide Topics/Categories, one stable slug, and any number of independent Tags." style={{ marginBottom: 12 }} />
 
     <div className="bdg-filters" style={{ marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-      <Input allowClear prefix={<SearchOutlined />} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search question, answer, keywords or topic" style={{ minWidth: 280, flex: "1 1 320px" }} />
+      <Input allowClear prefix={<SearchOutlined />} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search question, answer, keywords or FAQ topic" style={{ minWidth: 280, flex: "1 1 320px" }} />
       <Select allowClear showSearch optionFilterProp="label" value={localeFilter} onChange={setLocaleFilter} options={localeOptions} placeholder="All locales" style={{ width: 190 }} />
-      <Select allowClear showSearch optionFilterProp="label" value={topicFilter} onChange={setTopicFilter} options={topicOptions} placeholder="All topics" style={{ width: 180 }} />
+      <Select allowClear showSearch optionFilterProp="label" value={topicFilter} onChange={setTopicFilter} options={topicOptions} placeholder="All FAQ topics" style={{ width: 180 }} />
       <Select allowClear showSearch optionFilterProp="label" value={tagFilter} onChange={setTagFilter} options={tags.filter((tag) => tag.status === "active").map((tag) => ({ value: tag.id, label: tag.name }))} placeholder="All tags" style={{ width: 180 }} />
       <Select allowClear value={statusFilter} onChange={setStatusFilter} options={["published", "draft", "archived"].map((value) => ({ value, label: value }))} placeholder="All statuses" style={{ width: 150 }} />
       <Button onClick={clearFilters}>Clear filters</Button>
@@ -231,12 +226,11 @@ function FaqStudioPage() {
         <Form.Item name="slug" label="Stable slug" extra="Leave blank for a new FAQ to generate it automatically from the question. Once generated, changing the question does not change this slug."><Input placeholder="how-do-i-make-a-deposit" /></Form.Item>
         <Space style={{ display: "flex", flexWrap: "wrap" }} align="start">
           <Form.Item name="locale" label="Locale" rules={[{ required: true }]} style={{ width: 250 }}><Select showSearch optionFilterProp="label" loading={loading && !localeOptions.length} options={localeOptions} placeholder="Choose a platform locale" /></Form.Item>
-          <Form.Item name="topic_id" label="Topic" style={{ width: 260 }} extra="Each FAQ belongs to one Topic only."><Select allowClear showSearch optionFilterProp="label" onChange={(value) => { const category = categories.find((item) => Number(item.id) === Number(value)); form.setFieldValue("topic", category?.name || "General"); }} options={categories.map((category) => ({ value: category.id, label: category.name }))} /></Form.Item>
+          <Form.Item name="topic" label="FAQ Topic" rules={[{ required: true }]} style={{ width: 260 }} extra="FAQ Topics are independent from Guide Topics/Categories and can be localized for each FAQ language."><Input placeholder="Deposit" maxLength={160} /></Form.Item>
           <Form.Item name="status" label="Status" style={{ width: 180 }}><Select options={["published", "draft", "archived"].map((value) => ({ value, label: value }))} /></Form.Item>
           <Form.Item name="priority" label="Priority"><InputNumber min={1} max={999} /></Form.Item>
         </Space>
         <Form.Item name="tag_ids" label="Tags" extra="Optional flexible labels. Manage your own Tags from Content → Tags."><Select mode="multiple" allowClear showSearch optionFilterProp="label" options={tags.filter((tag) => tag.status === "active").map((tag) => ({ value: tag.id, label: tag.name }))} /></Form.Item>
-        <Form.Item name="topic" hidden><Input /></Form.Item>
         <Form.Item name="keywords" label="Search keywords and misspellings"><Input.TextArea rows={3} /></Form.Item>
         <Form.Item name="answer" hidden><Input /></Form.Item>
         <Form.Item label="FAQ answer — rich editor"><RichKnowledgeEditor value={answerJson} onChange={(json, html) => { setAnswerJson(json); setAnswerHtml(html); }} uploadImage={uploadImage} /></Form.Item>
