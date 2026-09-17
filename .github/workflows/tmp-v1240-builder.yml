@@ -8,7 +8,7 @@ on:
       - .github/workflows/tmp-v1240-builder.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-and-verify:
@@ -95,3 +95,14 @@ jobs:
             /tmp/v1240-files.txt
           if-no-files-found: error
           retention-days: 1
+
+      - name: Commit verified non-workflow implementation
+        run: |
+          git checkout HEAD -- .github/workflows/ci.yml .github/workflows/tmp-v1240-builder.yml
+          rm -f scripts/tmp_v1240_builder.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: v1.24.0 content taxonomy and stable FAQ slugs"
+          git push origin HEAD:feature/v1.24.0-content-taxonomy-stable-faq-slugs
