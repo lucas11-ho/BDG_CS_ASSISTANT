@@ -7,7 +7,7 @@ const core = await readFile(new URL('../src/core.js', import.meta.url), 'utf8');
 const api = await readFile(new URL('../../admin-pro/src/lib/api.ts', import.meta.url), 'utf8');
 const admin = await readFile(new URL('../../admin-pro/src/routes/_admin.ai-knowledge.tsx', import.meta.url), 'utf8');
 
-assert.match(core, /1\.23\.0-topics-security-control/, 'Runtime version must advance for production release gating');
+assert.match(core, /1\.24\.0-content-taxonomy-stable-faq-slugs/, 'Runtime version must advance for production release gating');
 assert.match(core, /\/admin\/knowledge\/template/, 'AI Knowledge template route must exist');
 assert.match(core, /\/admin\/knowledge\/import-preview/, 'AI Knowledge preview route must exist');
 assert.match(core, /\/admin\/knowledge\/import'/, 'AI Knowledge import route must exist');
