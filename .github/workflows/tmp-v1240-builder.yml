@@ -8,7 +8,7 @@ on:
       - .github/workflows/tmp-v1240-builder.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-and-verify:
@@ -78,14 +78,20 @@ jobs:
           npm run typecheck
           npm run build
 
-      - name: Commit verified implementation
+      - name: Export verified implementation patch
         run: |
-          rm -f scripts/tmp_v1240_builder.py .github/workflows/tmp-v1240-builder.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "feat: v1.24.0 content taxonomy and stable FAQ slugs"
-          git push origin HEAD:feature/v1.24.0-content-taxonomy-stable-faq-slugs
+          git diff --check
+          git diff --binary HEAD -- . ':(exclude).github/workflows/tmp-v1240-builder.yml' ':(exclude)scripts/tmp_v1240_builder.py' > /tmp/v1240.patch
+          git diff --name-only HEAD -- . ':(exclude).github/workflows/tmp-v1240-builder.yml' ':(exclude)scripts/tmp_v1240_builder.py' > /tmp/v1240-files.txt
+          echo "Changed files:"
+          cat /tmp/v1240-files.txt
 
-# rerun: v1.23 compatibility assertions now follow the v1.24 runtime marker
+      - name: Upload verified implementation patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: v1240-taxonomy-verified-patch
+          path: |
+            /tmp/v1240.patch
+            /tmp/v1240-files.txt
+          if-no-files-found: error
+          retention-days: 1
