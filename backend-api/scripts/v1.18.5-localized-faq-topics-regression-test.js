@@ -44,16 +44,17 @@ await test('Legacy API clients that omit Topic do not erase a saved Topic', asyn
   assert.ok(source.includes('if (!response?.ok || topic == null) return'));
 });
 
-await test('Admin preserves localized Topic compatibility while enforcing one Topic and separate Tags', async () => {
+await test('Admin preserves localized Topic compatibility while keeping FAQ Topic independent from Guide Topics', async () => {
   const page = fs.readFileSync(new URL('../../admin-pro/src/routes/_admin.faq.tsx', import.meta.url), 'utf8');
   const toolbar = fs.readFileSync(new URL('../../admin-pro/src/components/BulkContentRouteToolbar.tsx', import.meta.url), 'utf8');
-  assert.ok(page.includes('name="topic_id" label="Topic"'));
-  assert.ok(page.includes('Each FAQ belongs to one Topic only.'));
+  assert.ok(page.includes('name="topic" label="FAQ Topic"'));
+  assert.ok(page.includes('FAQ Topics are independent from Guide Topics/Categories'));
+  assert.ok(!page.includes('name="topic_id"'));
   assert.ok(!page.includes('name="topic_ids" label="Topics"'));
   assert.ok(!page.includes('name="primary_topic_id" label="Primary topic"'));
   assert.ok(page.includes('name="tag_ids" label="Tags"'));
   assert.ok(page.includes('Manage your own Tags from Content → Tags.'));
-  assert.ok(page.includes('name="topic" hidden'));
+  assert.ok(!page.includes('api.list("categories")'));
   assert.ok(toolbar.includes('Topic is locale-specific, so use the same language as each FAQ row.'));
   assert.match(toolbar, /title:\s*(?:t\()?['"]Topic['"]\)?\s*,\s*dataIndex:\s*['"]topic['"]/);
 });
