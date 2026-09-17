@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-// Final release verification contract for the v1.23.0 topics and security control center.
+// v1.23 security and Guide multi-topic behavior must remain compatible while
+// v1.24 intentionally returns FAQ to exactly one Topic.
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const migration = read('../migrations/055_v1.23.0_topics_security_control.sql');
 const core = read('../src/core.js');
@@ -31,7 +32,7 @@ assert.match(topics, /topic_slugs/);
 assert.match(topics, /primary_topic_id/);
 assert.match(topics, /tenant_id=\$1 AND platform_id=\$2/);
 
-assert.match(core, /1\.23\.0-topics-security-control/);
+assert.match(core, /1\.24\.0-content-taxonomy-stable-faq-slugs/);
 assert.match(core, /\/admin\/me\/2fa\/verify/);
 assert.match(core, /verifyOwn2fa/);
 assert.match(core, /2fa_self_verified/);
@@ -55,7 +56,7 @@ assert.match(adminApi, /forceLogoutPlatformAdmin/);
 assert.match(adminApi, /resetPlatformAdmin2FA/);
 assert.match(layout, /Security & Permissions/);
 assert.match(layout, /SafetyCertificateOutlined/);
-assert.match(layout, /v1\.23\.0/);
+assert.match(layout, /v1\.24\.0/);
 assert.match(account, /Test my 2FA code/);
 assert.match(account, /api\.verifyOwn2FA/);
 assert.match(account, /Code verified and consumed/);
@@ -72,12 +73,15 @@ assert.match(security, /Force logout/);
 assert.match(security, /Reset 2FA/);
 assert.match(security, /permission\.endsWith\("\.manage"\)/);
 
+// Guide remains the only many-topic content type.
 assert.match(guide, /name="topic_ids"/);
 assert.match(guide, /name="primary_topic_id"/);
 assert.match(guide, /mode="multiple"/);
 assert.match(guide, /topic\.is_primary/);
-assert.match(faq, /name="topic_ids"/);
-assert.match(faq, /name="primary_topic_id"/);
-assert.match(faq, /row\.topics/);
 
-console.log('v1.23.0 multi-topic + security control regression checks passed');
+// v1.24 intentionally replaces FAQ multi-topic UI with one Topic.
+assert.match(faq, /name="topic_id"/);
+assert.doesNotMatch(faq, /name="topic_ids"/);
+assert.doesNotMatch(faq, /name="primary_topic_id"/);
+
+console.log('v1.23 security + Guide multi-topic compatibility checks passed under v1.24');
