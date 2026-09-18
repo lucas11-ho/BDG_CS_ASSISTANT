@@ -195,7 +195,7 @@ const MediaEmbed = Node.create({
           src: embed,
           title: `${provider || "social"} media embed`,
           loading: "lazy",
-          allow: "accelerometer; autoplay; encrypted-media; picture-in-picture; web-share",
+          allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
           allowfullscreen: "true",
           referrerpolicy: "strict-origin-when-cross-origin",
         },
