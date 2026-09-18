@@ -495,20 +495,26 @@ async function uploadSupportFile(file: File, path: string, caption = "") {
 }
 
 export type EditorAiAction = 'ask' | 'fix_grammar' | 'professional' | 'casual' | 'summarize' | 'extend';
+export type EditorAiResult = {
+  text: string;
+  document: { type: 'doc'; content: any[] };
+  degraded?: boolean;
+};
 
 export async function streamEditorAI(
   payload: { action: EditorAiAction; text?: string; context?: string; prompt?: string; locale?: string },
   onToken: (text: string) => void,
   signal?: AbortSignal,
-) {
+  onStatus?: (message: string) => void,
+): Promise<EditorAiResult> {
   if (MOCK_MODE) {
-    const sample = payload.text ? `Improved: ${payload.text}` : 'AI generated editor content.';
-    for (const part of sample.split(/(\s+)/)) {
+    const text = payload.text ? `Improved: ${payload.text}` : 'AI generated editor content.';
+    for (const part of text.split(/(\s+)/)) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       onToken(part);
       await new Promise((resolve) => setTimeout(resolve, 16));
     }
-    return sample;
+    return { text, document:{ type:'doc', content:[{ type:'paragraph', content:[{ type:'text', text }] }] } };
   }
   if (!API_BASE_URL) throw new Error('Admin API is not configured. Set VITE_API_BASE_URL during the production build.');
   const token = getToken();
@@ -528,10 +534,12 @@ export async function streamEditorAI(
     const body = await response.json().catch(() => ({}));
     throw new Error(body?.error || `AI writing assistant failed (${response.status})`);
   }
+
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let finalText = '';
+  let result: EditorAiResult | null = null;
   try {
     while (!signal?.aborted) {
       const { done, value } = await reader.read();
@@ -545,6 +553,7 @@ export async function streamEditorAI(
         let event = 'message';
         const data:string[] = [];
         for (const line of block.split(/\r?\n/)) {
+          if (!line || line.startsWith(':')) continue;
           if (line.startsWith('event:')) event = line.slice(6).trim();
           if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
         }
@@ -555,6 +564,14 @@ export async function streamEditorAI(
           finalText += String(parsed.text);
           onToken(String(parsed.text));
         }
+        if (event === 'status' && parsed.message) onStatus?.(String(parsed.message));
+        if (event === 'result' && parsed.document?.type === 'doc') {
+          result = {
+            text:String(parsed.text || finalText || ''),
+            document:parsed.document,
+            degraded:parsed.degraded === true,
+          };
+        }
         if (event === 'error') throw new Error(parsed.error || 'AI stream failed');
       }
     }
@@ -562,7 +579,16 @@ export async function streamEditorAI(
     try { await reader.cancel(); } catch {}
     try { reader.releaseLock(); } catch {}
   }
-  return finalText;
+
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  if (result) return result;
+  const text = finalText.trim();
+  if (!text) throw new Error('AI finished without returning content. Please try again.');
+  return {
+    text,
+    degraded:true,
+    document:{ type:'doc', content:[{ type:'paragraph', content:[{ type:'text', text }] }] },
+  };
 }
 
 export const api = {
