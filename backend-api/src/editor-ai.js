@@ -38,11 +38,11 @@ function instructionFor(action, prompt) {
 }
 
 function sseEvent(event, data) {
-  return `event: ${event}\\ndata: ${JSON.stringify(data)}\\n\\n`;
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
 function sseComment(text = 'keep-alive') {
-  return `: ${text}\\n\\n`;
+  return `: ${text}\n\n`;
 }
 
 function trimPartialClosingTag(value, closingTag) {
@@ -214,7 +214,7 @@ function richPrompt(locale) {
     'Do not output images, iframes, scripts, raw HTML, links, or unknown node/mark types.',
     'Do not use markdown fences around the JSON.',
     `Write in locale: ${locale}.`,
-  ].join('\\n');
+  ].join('\n');
 }
 
 export async function streamEditorAi(request, env) {
@@ -251,15 +251,15 @@ export async function streamEditorAi(request, env) {
     'Use only facts present in the selected text or nearby document context.',
     'Follow the requested transformation and formatting precisely.',
     richPrompt(locale),
-  ].join('\\n\\n');
+  ].join('\n\n');
 
   const user = [
     `Task: ${instructionFor(action, payload.prompt)}`,
-    selectedText ? `Selected text:\\n${selectedText}` : '',
-    surroundingText ? `Nearby document context:\\n${surroundingText}` : '',
-  ].filter(Boolean).join('\\n\\n');
+    selectedText ? `Selected text:\n${selectedText}` : '',
+    surroundingText ? `Nearby document context:\n${surroundingText}` : '',
+  ].filter(Boolean).join('\n\n');
 
-  const apiBase = String(env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\\/$/, '');
+  const apiBase = String(env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\/$/, '');
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const controller = new AbortController();
@@ -334,7 +334,7 @@ export async function streamEditorAi(request, env) {
           if (done) break;
           resetInactivity();
           providerBuffer += decoder.decode(value, { stream:true });
-          const lines = providerBuffer.split(/\\r?\\n/);
+          const lines = providerBuffer.split(/\r?\n/);
           providerBuffer = lines.pop() || '';
 
           for (const rawLine of lines) {
