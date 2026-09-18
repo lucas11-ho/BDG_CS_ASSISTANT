@@ -4,7 +4,7 @@ const ALLOWED_TAGS = [
   'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'mark',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'hr',
-  'a', 'img', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
+  'a', 'img', 'iframe', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
   'div', 'span',
 ];
 
@@ -14,15 +14,17 @@ const SANITIZE_OPTIONS = {
     '*': ['class'],
     a: ['href', 'target', 'rel', 'title', 'class'],
     img: ['src', 'alt', 'title', 'width', 'height', 'loading', 'class'],
+    iframe: ['src', 'title', 'loading', 'allow', 'allowfullscreen', 'referrerpolicy', 'class'],
+    div: ['style', 'class', 'data-bdg-media-embed', 'data-source-url'],
     th: ['colspan', 'rowspan', 'scope', 'style', 'class'],
     td: ['colspan', 'rowspan', 'style', 'class'],
     p: ['style', 'class'],
-    div: ['style', 'class'],
     span: ['style', 'class'],
   },
   allowedSchemes: ['http', 'https', 'mailto', 'tel'],
   allowedSchemesByTag: {
     img: ['http', 'https'],
+    iframe: ['https'],
   },
   allowProtocolRelative: false,
   allowedStyles: {
@@ -34,7 +36,22 @@ const SANITIZE_OPTIONS = {
   },
   disallowedTagsMode: 'discard',
   exclusiveFilter(frame) {
-    return frame.tag === 'img' && !/^https:\/\//i.test(String(frame.attribs?.src || ''));
+    if (frame.tag === 'img') return !/^https:\/\//i.test(String(frame.attribs?.src || ''));
+    if (frame.tag === 'iframe') {
+      try {
+        const url = new URL(String(frame.attribs?.src || ''));
+        const host = url.hostname.toLowerCase();
+        const allowed =
+          host === 'www.youtube-nocookie.com'
+          || host === 'youtube-nocookie.com'
+          || host === 'platform.twitter.com'
+          || host === 'www.tiktok.com';
+        return url.protocol !== 'https:' || !allowed;
+      } catch {
+        return true;
+      }
+    }
+    return false;
   },
   transformTags: {
     a(tagName, attribs) {

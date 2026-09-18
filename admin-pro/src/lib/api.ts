@@ -494,6 +494,77 @@ async function uploadSupportFile(file: File, path: string, caption = "") {
   return payload;
 }
 
+export type EditorAiAction = 'ask' | 'fix_grammar' | 'professional' | 'casual' | 'summarize' | 'extend';
+
+export async function streamEditorAI(
+  payload: { action: EditorAiAction; text?: string; context?: string; prompt?: string; locale?: string },
+  onToken: (text: string) => void,
+  signal?: AbortSignal,
+) {
+  if (MOCK_MODE) {
+    const sample = payload.text ? `Improved: ${payload.text}` : 'AI generated editor content.';
+    for (const part of sample.split(/(\s+)/)) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      onToken(part);
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+    return sample;
+  }
+  if (!API_BASE_URL) throw new Error('Admin API is not configured. Set VITE_API_BASE_URL during the production build.');
+  const token = getToken();
+  const response = await fetch(`${API_BASE_URL}/admin/editor-ai/stream`, {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      Accept:'text/event-stream',
+      ...(token ? { Authorization:`Bearer ${token}` } : {}),
+      ...platformHeaders(),
+    },
+    body:JSON.stringify(payload),
+    signal,
+    cache:'no-store',
+  });
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.error || `AI writing assistant failed (${response.status})`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalText = '';
+  try {
+    while (!signal?.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream:true });
+      while (true) {
+        const match = buffer.match(/\r?\n\r?\n/);
+        if (!match || match.index === undefined) break;
+        const block = buffer.slice(0, match.index);
+        buffer = buffer.slice(match.index + match[0].length);
+        let event = 'message';
+        const data:string[] = [];
+        for (const line of block.split(/\r?\n/)) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+        }
+        if (!data.length) continue;
+        let parsed:any = {};
+        try { parsed = JSON.parse(data.join('\n')); } catch { parsed = { text:data.join('\n') }; }
+        if (event === 'token' && parsed.text) {
+          finalText += String(parsed.text);
+          onToken(String(parsed.text));
+        }
+        if (event === 'error') throw new Error(parsed.error || 'AI stream failed');
+      }
+    }
+  } finally {
+    try { await reader.cancel(); } catch {}
+    try { reader.releaseLock(); } catch {}
+  }
+  return finalText;
+}
+
 export const api = {
   login: async (email: string, password: string, twofa_code?: string, remember = false) => {
     if (MOCK_MODE)

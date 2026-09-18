@@ -168,3 +168,36 @@
 .guide-runtime-font :where(h1, h2, h3, h4, h5, h6, p, span, a, button, input, textarea, select, option, label, li, td, th, blockquote, figcaption, code) {
   font-family: var(--guide-runtime-font, var(--font-sans)) !important;
 }
+
+.bdg-rich-public .bdg-telegram-quote,
+.bdg-rich-public blockquote.bdg-telegram-quote {
+  margin: 1.25rem 0;
+  padding: 0.9rem 1.1rem;
+  border-left: 4px solid var(--color-primary);
+  border-radius: 0 0.75rem 0.75rem 0;
+  background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+  font-size: 1.08em;
+  font-style: italic;
+  line-height: 1.7;
+}
+.bdg-rich-public .bdg-media-embed {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  margin: 1.25rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: 0.9rem;
+  background: var(--color-secondary);
+}
+.bdg-rich-public .bdg-media-embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.bdg-rich-public table img {
+  max-width: 100%;
+  height: auto;
+}
