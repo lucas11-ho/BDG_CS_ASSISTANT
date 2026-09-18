@@ -107,6 +107,10 @@ jobs:
           npm --prefix backend-api run test:v1191-admin-trust
           npm --prefix backend-api run test:v1202-admin-security
           npm --prefix backend-api run test:v1220-platform-transfer
+          npm --prefix backend-api run test:v1230-topics-security
+          npm --prefix backend-api run test:v1240-taxonomy
+          npm --prefix backend-api run test:v1250-editor
+          npm --prefix backend-api run test:v1251-editor-stability
           npm --prefix backend-api run test:security
           npm --prefix backend-api run test:chat-reliability
           npm --prefix backend-api run test:structured
