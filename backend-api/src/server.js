@@ -17,6 +17,7 @@ import { closeSupportEventBus } from './support-events.js';
 import { startAiJobWorker } from './ai-job-worker.js';
 import { allowedOrigin, databaseDescriptor, getRuntimeEnv, validateRuntimeEnv } from './env.js';
 import { createR2Adapter } from './r2-adapter.js';
+import { streamEditorAi } from './editor-ai.js';
 import { handleBulkContentRoute } from './bulk-content-studio.js';
 import {
   closeFaqTopicPools,
@@ -35,8 +36,13 @@ import {
 } from './localized-categories-analytics.js';
 
 const env = getRuntimeEnv();
-const API_VERSION = '1.24.0-content-taxonomy-stable-faq-slugs';
+const API_VERSION = '1.25.0-alive-rich-editor';
 const API_FEATURES = [
+  'alive-rich-editor',
+  'persistent-editor-media',
+  'editor-ai-sse',
+  'advanced-table-cells',
+  'safe-social-embeds',
   'faq-stable-slugs',
   'faq-single-topic',
   'managed-content-tags',
@@ -301,6 +307,28 @@ async function authenticatedBulkResponse(request, env, url, path, requestHeaders
   return handleBulkContentRoute(request, env, scope);
 }
 
+async function authenticatedEditorAiResponse(request, env, url, requestHeaders, signal) {
+  const contextRequest = new Request(new URL('/admin/platform-context', url.origin), { method:'GET', headers:requestHeaders, signal });
+  const contextResponse = await api.fetch(contextRequest, env);
+  if (!contextResponse.ok) return contextResponse;
+  const meRequest = new Request(new URL('/admin/me', url.origin), { method:'GET', headers:requestHeaders, signal });
+  const meResponse = await api.fetch(meRequest, env);
+  if (!meResponse.ok) return meResponse;
+  const context = await contextResponse.json();
+  const me = await meResponse.json();
+  const user = me?.user || me || {};
+  const access = context?.access || {};
+  const owner = String(user?.role || '').toLowerCase() === 'owner';
+  const permissions = Array.isArray(user?.permissions) ? user.permissions : [];
+  if (access.can_write !== true) {
+    return new Response(JSON.stringify({ ok:false,error:'This platform membership is read-only',code:'PLATFORM_WRITE_DENIED' }), { status:403, headers:{ 'Content-Type':'application/json; charset=utf-8' } });
+  }
+  if (!owner && !permissions.includes('content.manage')) {
+    return new Response(JSON.stringify({ ok:false,error:'Administrator permission required: content.manage',code:'ADMIN_PERMISSION_DENIED' }), { status:403, headers:{ 'Content-Type':'application/json; charset=utf-8' } });
+  }
+  return streamEditorAi(request, env);
+}
+
 async function authenticatedContentAnalyticsResponse(request, env, url, path, requestHeaders, signal) {
   const contextRequest = new Request(new URL('/admin/platform-context', url.origin), { method: 'GET', headers: requestHeaders, signal });
   const contextResponse = await api.fetch(contextRequest, env);
@@ -372,6 +400,7 @@ const server = http.createServer(async (req, res) => {
     });
     const method = request.method.toUpperCase();
     const isTrafficWrite = method === 'POST' && (path === '/public/analytics/pageview' || path === '/public/analytics/heartbeat');
+    const isEditorAi = method === 'POST' && path === '/admin/editor-ai/stream';
     const isContentAnalyticsAdmin = method !== 'OPTIONS' && (
       path === '/admin/analytics/summary'
       || path === '/admin/categories/locales'
@@ -381,7 +410,9 @@ const server = http.createServer(async (req, res) => {
     );
     let response = isTrafficWrite
       ? await handleTrafficPublicRoute(request, env)
-      : isContentAnalyticsAdmin
+      : isEditorAi
+        ? await authenticatedEditorAiResponse(request, env, url, requestHeaders, requestAbort.signal)
+        : isContentAnalyticsAdmin
         ? await authenticatedContentAnalyticsResponse(request, env, url, path, requestHeaders, requestAbort.signal)
         : path.startsWith('/admin/content-bulk/') && request.method.toUpperCase() !== 'OPTIONS'
           ? await authenticatedBulkResponse(request, env, url, path, requestHeaders, requestAbort.signal)
