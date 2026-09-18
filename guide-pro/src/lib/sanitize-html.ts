@@ -17,7 +17,9 @@ function safeEmbedUrl(value: string) {
     const url = new URL(value);
     const host = url.hostname.toLowerCase();
     return url.protocol === "https:" && (
-      host === "www.youtube-nocookie.com"
+      host === "www.youtube.com"
+      || host === "youtube.com"
+      || host === "www.youtube-nocookie.com"
       || host === "youtube-nocookie.com"
       || host === "platform.twitter.com"
       || host === "www.tiktok.com"
