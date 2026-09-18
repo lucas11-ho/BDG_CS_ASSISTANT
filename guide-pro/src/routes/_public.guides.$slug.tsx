@@ -237,7 +237,23 @@ function GuideDetail() {
 }
 
 function safeUrl(value:unknown) { const url=String(value||"").trim(); return url.startsWith("/") || /^https?:\/\//i.test(url) ? url : ""; }
-function RichDocumentView({ document }: { document:any }) { return <div className="space-y-4">{(document?.content || []).map((node:any,index:number)=><RichNode key={index} node={node}/>)}</div>; }
+function safeEmbedUrl(value:unknown) {
+  try {
+    const url = new URL(String(value || "").trim());
+    const host = url.hostname.toLowerCase();
+    const allowed =
+      host === "www.youtube.com"
+      || host === "youtube.com"
+      || host === "www.youtube-nocookie.com"
+      || host === "youtube-nocookie.com"
+      || host === "platform.twitter.com"
+      || host === "www.tiktok.com";
+    return url.protocol === "https:" && allowed ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+function RichDocumentView({ document }: { document:any }) { return <div className="bdg-rich-public space-y-4">{(document?.content || []).map((node:any,index:number)=><RichNode key={index} node={node}/>)}</div>; }
 function RichInline({ nodes=[] }: { nodes?:any[] }) { return <>{nodes.map((node,index)=>{
   if (node.type === "hardBreak") return <br key={index}/>;
   if (node.type !== "text") return <RichNode key={index} node={node}/>;
@@ -262,6 +278,29 @@ function RichNode({ node }: { node:any }): any {
   if (node.type === "listItem") return <li className="leading-7">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</li>;
   if (node.type === "blockquote") return <blockquote className="rounded-2xl border-l-4 border-[color:var(--bdg-gold)] bg-muted p-4">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</blockquote>;
   if (node.type === "image" && safeUrl(node.attrs?.src)) return <figure className="overflow-hidden rounded-2xl border border-border bg-muted"><button type="button" className="block w-full cursor-zoom-in" onClick={()=>openGuideImage(safeUrl(node.attrs.src),String(node.attrs?.alt || "Guide image"))}><img src={safeUrl(node.attrs.src)} alt={String(node.attrs?.alt || "")} className="w-full object-contain" loading="lazy"/></button></figure>;
+  if (node.type === "mediaEmbed") {
+    const source = safeUrl(node.attrs?.url);
+    const embed = safeEmbedUrl(node.attrs?.embedUrl);
+    if (!source && !embed) return null;
+    if (!embed) return source ? <div className="bdg-link-card"><a href={source} target="_blank" rel="noreferrer">{String(node.attrs?.label || "Open media")}</a></div> : null;
+    return (
+      <div className="bdg-media-embed" data-bdg-media-embed={String(node.attrs?.provider || "")} data-source-url={source || undefined}>
+        <iframe
+          src={embed}
+          title={String(node.attrs?.label || node.attrs?.provider || "Embedded media")}
+          loading="lazy"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+        {source && <a href={source} target="_blank" rel="noreferrer" className="bdg-media-fallback">{String(node.attrs?.label || "Open original media")}</a>}
+      </div>
+    );
+  }
+  if (node.type === "linkCard") {
+    const href = safeUrl(node.attrs?.url);
+    return href ? <div className="bdg-link-card"><a href={href} target="_blank" rel="noreferrer">{String(node.attrs?.label || "Open link")}</a></div> : null;
+  }
   if (node.type === "horizontalRule") return <hr className="border-border"/>;
   if (node.type === "table") return <div className="overflow-x-auto"><table className="w-full border-collapse">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</table></div>;
   if (node.type === "tableRow") return <tr>{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</tr>;

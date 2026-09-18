@@ -88,6 +88,7 @@ jobs:
           npm run test:v1250-editor
           npm run test:v1251-editor-stability
           npm run test:v1252-youtube
+          npm run test:v1253-public-media
           npm run test:chat-reliability
           npm run test:security
           npm run test:structured
