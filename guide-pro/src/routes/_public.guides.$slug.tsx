@@ -237,6 +237,31 @@ function GuideDetail() {
 }
 
 function safeUrl(value:unknown) { const url=String(value||"").trim(); return url.startsWith("/") || /^https?:\/\//i.test(url) ? url : ""; }
+function safeMediaEmbed(node:any) {
+  const provider=String(node?.attrs?.provider || "");
+  const source=String(node?.attrs?.sourceUrl || "");
+  if (!/^https:\/\//i.test(source)) return null;
+  try {
+    const url=new URL(source);
+    const host=url.hostname.toLowerCase().replace(/^www\./,"");
+    if (provider === "youtube" && ["youtu.be","youtube.com","m.youtube.com"].includes(host)) {
+      let id="";
+      if (host === "youtu.be") id=url.pathname.split("/").filter(Boolean)[0] || "";
+      else if (url.pathname === "/watch") id=url.searchParams.get("v") || "";
+      else { const parts=url.pathname.split("/").filter(Boolean); if (["shorts","embed","live"].includes(parts[0] || "")) id=parts[1] || ""; }
+      return /^[A-Za-z0-9_-]{6,20}$/.test(id) ? { provider, source, embed:`https://www.youtube-nocookie.com/embed/${id}`, title:"YouTube video" } : null;
+    }
+    if (provider === "x" && ["x.com","twitter.com","mobile.twitter.com"].includes(host)) {
+      const id=url.pathname.match(/^\/[^/]+\/status\/(\d+)/)?.[1];
+      return id ? { provider, source, embed:`https://platform.twitter.com/embed/Tweet.html?id=${id}`, title:"X post" } : null;
+    }
+    if (provider === "tiktok" && ["tiktok.com","m.tiktok.com"].includes(host)) {
+      const id=url.pathname.match(/\/video\/(\d+)/)?.[1];
+      return id ? { provider, source, embed:`https://www.tiktok.com/player/v1/${id}`, title:"TikTok video" } : null;
+    }
+  } catch {}
+  return null;
+}
 function RichDocumentView({ document }: { document:any }) { return <div className="space-y-4">{(document?.content || []).map((node:any,index:number)=><RichNode key={index} node={node}/>)}</div>; }
 function RichInline({ nodes=[] }: { nodes?:any[] }) { return <>{nodes.map((node,index)=>{
   if (node.type === "hardBreak") return <br key={index}/>;
@@ -260,13 +285,14 @@ function RichNode({ node }: { node:any }): any {
   if (node.type === "bulletList") return <ul className="list-disc space-y-2 pl-6">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</ul>;
   if (node.type === "orderedList") return <ol className="list-decimal space-y-2 pl-6">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</ol>;
   if (node.type === "listItem") return <li className="leading-7">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</li>;
-  if (node.type === "blockquote") return <blockquote className="rounded-2xl border-l-4 border-[color:var(--bdg-gold)] bg-muted p-4">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</blockquote>;
+  if (node.type === "blockquote") return <blockquote className="rounded-r-2xl border-l-4 border-[color:var(--bdg-gold)] bg-muted px-5 py-4 text-lg italic leading-8">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</blockquote>;
   if (node.type === "image" && safeUrl(node.attrs?.src)) return <figure className="overflow-hidden rounded-2xl border border-border bg-muted"><button type="button" className="block w-full cursor-zoom-in" onClick={()=>openGuideImage(safeUrl(node.attrs.src),String(node.attrs?.alt || "Guide image"))}><img src={safeUrl(node.attrs.src)} alt={String(node.attrs?.alt || "")} className="w-full object-contain" loading="lazy"/></button></figure>;
+  if (node.type === "mediaEmbed") { const media=safeMediaEmbed(node); return media ? <figure className="overflow-hidden rounded-2xl border border-border bg-black shadow-sm"><div className="aspect-video w-full"><iframe src={media.embed} title={media.title} loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" className="h-full w-full border-0"/></div><figcaption className="border-t border-border bg-card px-3 py-2 text-xs text-muted-foreground"><a href={media.source} target="_blank" rel="noreferrer" className="underline">Open original {media.title}</a></figcaption></figure> : null; }
   if (node.type === "horizontalRule") return <hr className="border-border"/>;
   if (node.type === "table") return <div className="overflow-x-auto"><table className="w-full border-collapse">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</table></div>;
   if (node.type === "tableRow") return <tr>{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</tr>;
-  if (node.type === "tableHeader") return <th className="border border-border bg-muted p-2 text-left"><RichInline nodes={children.flatMap((child:any)=>child.content || [child])}/></th>;
-  if (node.type === "tableCell") return <td className="border border-border p-2"><RichInline nodes={children.flatMap((child:any)=>child.content || [child])}/></td>;
+  if (node.type === "tableHeader") return <th className="border border-border bg-muted p-2 text-left align-top"><div className="space-y-2">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</div></th>;
+  if (node.type === "tableCell") return <td className="border border-border p-2 align-top"><div className="space-y-2">{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</div></td>;
   return <>{children.map((child:any,index:number)=><RichNode key={index} node={child}/>)}</>;
 }
 
