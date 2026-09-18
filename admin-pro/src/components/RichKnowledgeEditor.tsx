@@ -242,7 +242,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
   const dragPosRef = useRef<number | null>(null);
   const aiAbortRef = useRef<AbortController | null>(null);
 
-  const findUploadNode = (uploadId: string) => {
+  const findUploadNode = (uploadId: string): { pos: number; node: any } | null => {
     const active = editorRef.current;
     if (!active) return null;
     let found: { pos: number; node: any } | null = null;
