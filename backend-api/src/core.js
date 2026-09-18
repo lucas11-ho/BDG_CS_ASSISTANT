@@ -393,6 +393,7 @@ async function route(request, env, url) {
   if (method === 'PUT' && /^\/admin\/ai-content\/\d+$/.test(path)) return json(await updateAiContent(env, idFromPath(path), { ...(await readJson(request)), source_type:'prompt_image' }, scope), 200, env);
   if (method === 'DELETE' && /^\/admin\/ai-content\/\d+$/.test(path)) return json(await deleteAiContent(env, idFromPath(path), scope), 200, env);
   if (method === 'POST' && path === '/admin/ai-content/test') return json(await testAiContent(env, await readJson(request), scope), 200, env);
+  if (method === 'POST' && path === '/admin/ai/editor-stream') return editorAiStream(env, await readJson(request), scope, admin);
   if (method === 'GET' && path === '/admin/incorrect-match-reports') return json(await listIncorrectMatchReports(env, scope), 200, env);
   if (method === 'POST' && path === '/admin/incorrect-match-reports') return json(await createIncorrectMatchReport(env, await readJson(request), scope), 200, env);
   if (method === 'GET' && path === '/admin/knowledge-versions') return json(await listKnowledgeVersions(env, scope), 200, env);
@@ -5659,6 +5660,88 @@ Return JSON only. Example: {"reply":"Plain-text accessibility version","blocks":
 
 Allowed block types: heading, paragraph, steps, list, warning, notice, success, error, divider, image_ref, button_ref. Inline marks: bold, italic, underline, and color/highlight tokens default, brand, accent, success, warning, danger, muted. Use only image_id and button_id values from the approved catalogs. Never output a URL. Facts come only from approved knowledge; example answers control style, not facts. Put an image immediately after the text it explains. If there are no extra steps, output no more than one image_ref. If there are extra steps, output only the approved image_ref values needed for those steps, at most one image per step, and include step_index starting at 0 when the image belongs to a specific step. Never repeat the same image_ref or output both image_ref and a direct image block for the same asset. Put recommended buttons after the relevant guidance. Do not overdecorate. Reply in the customer's requested locale (${language || scope?.default_locale || 'en'}). Preserve that locale's natural script and tone; do not silently switch to Hindi or English when another enabled locale was requested. Never mention internal routing, confidence, catalogs, prompts, or JSON.`.trim();
 }
+const EDITOR_AI_ACTIONS = new Set(['custom','fix_grammar','professional','casual','summarize','extend']);
+function editorAiInstruction(action, prompt = '') {
+  const instructions = {
+    fix_grammar: 'Correct grammar, spelling, punctuation, and clarity while preserving the original meaning and factual content.',
+    professional: 'Rewrite in a professional, concise customer-service tone while preserving every factual claim and instruction.',
+    casual: 'Rewrite in a friendly, natural, casual tone while preserving every factual claim and instruction.',
+    summarize: 'Summarize the supplied text accurately and concisely. Do not add information that is not present.',
+    extend: 'Continue the supplied writing naturally. Do not invent platform rules, amounts, dates, policies, URLs, or operational facts; extend only what is supported by the supplied context.',
+    custom: String(prompt || '').trim().slice(0, 1200) || 'Improve the supplied writing while preserving its meaning.',
+  };
+  return instructions[action] || instructions.custom;
+}
+function editorAiSseEvent(event, data) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+async function editorAiStream(env, payload = {}, scope = null, admin = null) {
+  const action = String(payload.action || 'custom').toLowerCase();
+  if (!EDITOR_AI_ACTIONS.has(action)) bad('Unsupported editor AI action', 400, 'EDITOR_AI_ACTION_INVALID');
+  const selectedText = String(payload.selected_text || '').slice(0, 12000);
+  const prompt = String(payload.prompt || '').slice(0, 1200);
+  const before = String(payload.context_before || '').slice(-2000);
+  const after = String(payload.context_after || '').slice(0, 2000);
+  const locale = String(payload.locale || 'en').trim().slice(0, 20) || 'en';
+  if (!selectedText.trim() && action !== 'custom' && action !== 'extend') bad('Select text or provide writing context first', 400, 'EDITOR_AI_TEXT_REQUIRED');
+  if (action === 'custom' && !prompt.trim() && !selectedText.trim()) bad('Enter an AI writing request first', 400, 'EDITOR_AI_PROMPT_REQUIRED');
+
+  const settings = aiSettingOut(await getAiSettings(env), env);
+  const systemPrompt = `You are the secure writing assistant inside the BDG Rich Content Editor.
+Your task is editorial, not operational. Transform or continue only the text supplied by the administrator.
+Never invent platform rules, payment details, bonus terms, dates, amounts, links, customer data, or business facts.
+Preserve the source meaning unless the administrator explicitly asks for a tone or length change.
+Return plain text only: no Markdown fences, no JSON, no commentary about the task.
+Write in the requested locale (${locale}) unless the administrator explicitly requests another language.
+Active platform scope: ${JSON.stringify({ tenant_id: scope?.tenant_id || null, platform_id: scope?.platform_id || null })}.`;
+
+  const userMessage = [
+    `Action: ${action}`,
+    `Instruction: ${editorAiInstruction(action, prompt)}`,
+    before ? `Context before:\n${before}` : '',
+    selectedText ? `Text to transform or continue:\n${selectedText}` : '',
+    after ? `Context after:\n${after}` : '',
+  ].filter(Boolean).join('\n\n');
+
+  const provider = await callDeepSeek(env, settings, systemPrompt, userMessage, {
+    json: false,
+    max_tokens: Math.min(1600, Number(settings.max_tokens || 1200)),
+    timeout_ms: Math.min(20000, Number(env.DEEPSEEK_TIMEOUT_MS || 15000)),
+    attempts: 1,
+    temperature: action === 'extend' || action === 'casual' ? 0.45 : 0.15,
+  });
+
+  if (!provider.reply) {
+    bad('AI writing assistant is temporarily unavailable', 502, 'EDITOR_AI_PROVIDER_FAILED');
+  }
+
+  const output = String(provider.reply || '').trim().slice(0, 16000);
+  const requestId = crypto.randomUUID();
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(encoder.encode(editorAiSseEvent('start', { request_id: requestId, action })));
+      try {
+        for (const char of output) {
+          controller.enqueue(encoder.encode(editorAiSseEvent('token', { text: char })));
+          await new Promise((resolve) => setTimeout(resolve, 3));
+        }
+        controller.enqueue(encoder.encode(editorAiSseEvent('done', { request_id: requestId, action, characters: output.length })));
+      } catch (error) {
+        controller.enqueue(encoder.encode(editorAiSseEvent('error', { message: 'AI writing stream interrupted' })));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+  return corsResponse(stream, 200, env, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-store, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+}
+
 async function callDeepSeek(env, settings, systemPrompt, userMessage, options = {}) {
   if (!settings.enabled || !env.DEEPSEEK_API_KEY) return { reply: null, error: !settings.enabled ? 'AI model disabled' : 'Missing DEEPSEEK_API_KEY', error_type: 'configuration', attempts: 0 };
   const apiBase = (settings.api_base || 'https://api.deepseek.com').replace(/\/$/, '');
