@@ -13,7 +13,7 @@ import { Table } from "@tiptap/extension-table";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableRow } from "@tiptap/extension-table-row";
-import { Button, ColorPicker, Divider, Dropdown, Space, Tooltip, message } from "antd";
+import { Button, ColorPicker, Divider, Dropdown, Input, Modal, Space, Tooltip, message } from "antd";
 import {
   AlignCenterOutlined,
   AlignLeftOutlined,
@@ -26,7 +26,6 @@ import {
   ItalicOutlined,
   LinkOutlined,
   OrderedListOutlined,
-  PictureOutlined,
   PlusOutlined,
   RedoOutlined,
   RobotOutlined,
@@ -37,6 +36,7 @@ import {
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import { streamEditorAI, type EditorAiAction } from "@/lib/api";
+import { createSmallBlurPreview, isPermanentHttpsUrl, mediaTargetFromUrl, normalizeUserUrl } from "@/lib/rich-editor-utils";
 import { useAdminI18n } from "@/i18n/runtime";
 
 type Props = {
@@ -90,30 +90,63 @@ const PersistentImage = Image.extend({
   },
 });
 
-function mediaEmbedFromUrl(raw: string) {
-  try {
-    const url = new URL(raw.trim());
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    if (host === "youtu.be" || host.endsWith("youtube.com")) {
-      const id = host === "youtu.be" ? url.pathname.split("/").filter(Boolean)[0] : url.searchParams.get("v") || url.pathname.match(/\/(?:shorts|embed)\/([^/?]+)/)?.[1];
-      if (!id || !/^[\w-]{6,20}$/.test(id)) return null;
-      return { provider: "youtube", url: raw.trim(), embedUrl: `https://www.youtube-nocookie.com/embed/${id}` };
-    }
-    if (host === "x.com" || host === "twitter.com" || host.endsWith(".x.com") || host.endsWith(".twitter.com")) {
-      const id = url.pathname.match(/\/status\/(\d+)/)?.[1];
-      if (!id) return null;
-      return { provider: "x", url: raw.trim(), embedUrl: `https://platform.twitter.com/embed/Tweet.html?id=${id}` };
-    }
-    if (host === "tiktok.com" || host.endsWith(".tiktok.com")) {
-      const id = url.pathname.match(/\/video\/(\d+)/)?.[1];
-      if (!id) return null;
-      return { provider: "tiktok", url: raw.trim(), embedUrl: `https://www.tiktok.com/player/v1/${id}` };
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
+const AiDraft = Node.create({
+  name: "aiDraft",
+  group: "block",
+  atom: true,
+  selectable: false,
+  draggable: false,
+  addAttributes() {
+    return {
+      draftId: { default: "" },
+      text: { default: "" },
+      status: { default: "streaming" },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "div[data-bdg-ai-draft]" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "div",
+      {
+        class: "bdg-ai-draft",
+        "data-bdg-ai-draft": String(HTMLAttributes.draftId || ""),
+        "data-status": String(HTMLAttributes.status || "streaming"),
+      },
+      String(HTMLAttributes.text || ""),
+    ];
+  },
+  addNodeView() {
+    return ({ node }) => {
+      const dom = document.createElement("div");
+      dom.className = "bdg-ai-draft";
+      dom.contentEditable = "false";
+      const label = document.createElement("div");
+      label.className = "bdg-ai-draft-label";
+      label.textContent = "AI draft";
+      const body = document.createElement("div");
+      body.className = "bdg-ai-draft-body";
+      const cursor = document.createElement("span");
+      cursor.className = "bdg-ai-draft-cursor";
+      cursor.textContent = "▋";
+      dom.append(label, body, cursor);
+      const paint = (current: typeof node) => {
+        body.textContent = String(current.attrs.text || "");
+        dom.dataset.status = String(current.attrs.status || "streaming");
+      };
+      paint(node);
+      return {
+        dom,
+        update(next) {
+          if (next.type.name !== node.type.name) return false;
+          paint(next);
+          return true;
+        },
+      };
+    };
+  },
+});
 
 const MediaEmbed = Node.create({
   name: "mediaEmbed",
@@ -125,6 +158,7 @@ const MediaEmbed = Node.create({
       provider: { default: "" },
       url: { default: "" },
       embedUrl: { default: "" },
+      label: { default: "Open original media" },
     };
   },
   parseHTML() {
@@ -133,10 +167,12 @@ const MediaEmbed = Node.create({
       getAttrs: (element) => {
         const el = element as HTMLElement;
         const iframe = el.querySelector("iframe");
+        const anchor = el.querySelector("a");
         return {
           provider: el.dataset.bdgMediaEmbed || "",
-          url: el.dataset.sourceUrl || "",
+          url: el.dataset.sourceUrl || anchor?.getAttribute("href") || "",
           embedUrl: iframe?.getAttribute("src") || "",
+          label: anchor?.textContent || "Open original media",
         };
       },
     }];
@@ -145,6 +181,7 @@ const MediaEmbed = Node.create({
     const provider = String(HTMLAttributes.provider || "");
     const source = String(HTMLAttributes.url || "");
     const embed = String(HTMLAttributes.embedUrl || "");
+    const label = String(HTMLAttributes.label || "Open original media");
     return [
       "div",
       mergeAttributes({
@@ -163,6 +200,59 @@ const MediaEmbed = Node.create({
           referrerpolicy: "strict-origin-when-cross-origin",
         },
       ],
+      [
+        "a",
+        {
+          href: source,
+          target: "_blank",
+          rel: "noopener noreferrer",
+          class: "bdg-media-fallback",
+        },
+        label,
+      ],
+    ];
+  },
+});
+
+const LinkCard = Node.create({
+  name: "linkCard",
+  group: "block",
+  atom: true,
+  draggable: true,
+  addAttributes() {
+    return {
+      provider: { default: "external" },
+      url: { default: "" },
+      label: { default: "Open link" },
+    };
+  },
+  parseHTML() {
+    return [{
+      tag: "div[data-bdg-link-card]",
+      getAttrs: (element) => {
+        const el = element as HTMLElement;
+        const anchor = el.querySelector("a");
+        return {
+          provider: el.dataset.provider || "external",
+          url: anchor?.getAttribute("href") || el.dataset.sourceUrl || "",
+          label: anchor?.textContent || "Open link",
+        };
+      },
+    }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    const provider = String(HTMLAttributes.provider || "external");
+    const source = String(HTMLAttributes.url || "");
+    const label = String(HTMLAttributes.label || "Open link");
+    return [
+      "div",
+      {
+        class: "bdg-link-card",
+        "data-bdg-link-card": "true",
+        "data-provider": provider,
+        "data-source-url": source,
+      },
+      ["a", { href: source, target: "_blank", rel: "noopener noreferrer" }, label],
     ];
   },
 });
@@ -174,9 +264,10 @@ function cleanIncomingDocument(value?: string) {
     const parsed = JSON.parse(value);
     if (parsed?.type !== "doc") return fallback;
     const clean = (node: any): any | null => {
+      if (node?.type === "aiDraft") return null;
       if (node?.type === "image") {
         const src = String(node?.attrs?.src || "");
-        if (!/^https:\/\//i.test(src)) return null;
+        if (!isPermanentHttpsUrl(src)) return null;
         return { ...node, attrs: { ...node.attrs, uploadId: null, uploadStatus: "ready" } };
       }
       const content = Array.isArray(node?.content) ? node.content.map(clean).filter(Boolean) : undefined;
@@ -188,27 +279,19 @@ function cleanIncomingDocument(value?: string) {
   }
 }
 
-function documentHasTemporaryMedia(json: any) {
-  let temporary = false;
+function documentHasTransientNodes(json: any) {
+  let transient = false;
   const walk = (node: any) => {
-    if (!node || temporary) return;
+    if (!node || transient) return;
+    if (node.type === "aiDraft") transient = true;
     if (node.type === "image") {
       const src = String(node.attrs?.src || "");
-      if (node.attrs?.uploadStatus === "uploading" || /^(blob:|data:)/i.test(src)) temporary = true;
+      if (node.attrs?.uploadStatus === "uploading" || /^(blob:|data:)/i.test(src)) transient = true;
     }
     if (Array.isArray(node.content)) node.content.forEach(walk);
   };
   walk(json);
-  return temporary;
-}
-
-function readFileDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("Could not preview image"));
-    reader.readAsDataURL(file);
-  });
+  return transient;
 }
 
 function firstTopLevelPos(editor: any, rawPos: number) {
@@ -216,6 +299,12 @@ function firstTopLevelPos(editor: any, rawPos: number) {
   const resolved = editor.state.doc.resolve(bounded);
   if (resolved.depth === 0) return bounded;
   return resolved.before(1);
+}
+
+function afterTopLevelBlock(editor: any, rawPos: number) {
+  const pos = firstTopLevelPos(editor, rawPos);
+  const node = editor.state.doc.nodeAt(pos);
+  return node ? Math.min(editor.state.doc.content.size, pos + node.nodeSize) : editor.state.doc.content.size;
 }
 
 function blockTargetAtPoint(editor: any, clientX: number, clientY: number) {
@@ -236,11 +325,30 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
   const [hoveredBlock, setHoveredBlock] = useState<HoveredBlock>(null);
   const [aiReady, setAiReady] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
-  const [selectionTick, setSelectionTick] = useState(0);
+  const [aiStatus, setAiStatus] = useState("");
+  const [, setSelectionTick] = useState(0);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkValue, setLinkValue] = useState("");
+  const [linkText, setLinkText] = useState("");
+  const [mediaModalOpen, setMediaModalOpen] = useState(false);
+  const [mediaValue, setMediaValue] = useState("");
+  const [aiPromptOpen, setAiPromptOpen] = useState(false);
+  const [aiPromptValue, setAiPromptValue] = useState("");
+
   const inputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<any>(null);
   const dragPosRef = useRef<number | null>(null);
   const aiAbortRef = useRef<AbortController | null>(null);
+  const pendingUploadsRef = useRef(0);
+  const aiBusyRef = useRef(false);
+  const suppressPersistRef = useRef(false);
+
+  const persistEditor = (active: any) => {
+    if (!active || suppressPersistRef.current || pendingUploadsRef.current > 0 || aiBusyRef.current) return;
+    const json = active.getJSON();
+    if (documentHasTransientNodes(json)) return;
+    onChange(JSON.stringify(json), active.getHTML());
+  };
 
   const findUploadNode = (uploadId: string): { pos: number; node: any } | null => {
     const active = editorRef.current;
@@ -256,35 +364,65 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
     return found;
   };
 
+  const findAiDraft = (draftId: string): { pos: number; node: any } | null => {
+    const active = editorRef.current;
+    if (!active) return null;
+    let found: { pos: number; node: any } | null = null;
+    active.state.doc.descendants((node: any, pos: number) => {
+      if (node.type.name === "aiDraft" && node.attrs.draftId === draftId) {
+        found = { pos, node };
+        return false;
+      }
+      return !found;
+    });
+    return found;
+  };
+
   const queueImageUpload = async (file: File, pos?: number) => {
     const active = editorRef.current;
     if (!active || !file.type.startsWith("image/")) return;
+    if (file.size > 20 * 1024 * 1024) {
+      message.error(t("Image is too large. Maximum size is 20 MB."));
+      return;
+    }
+
     const uploadId = crypto.randomUUID();
-    setPendingUploads((count) => count + 1);
+    pendingUploadsRef.current += 1;
+    suppressPersistRef.current = true;
+    setPendingUploads(pendingUploadsRef.current);
+
     try {
-      const preview = await readFileDataUrl(file);
+      const preview = await createSmallBlurPreview(file);
       const attrs = { src: preview, alt: file.name, uploadId, uploadStatus: "uploading" };
       if (typeof pos === "number") active.chain().focus().insertContentAt(pos, { type: "image", attrs }).run();
       else active.chain().focus().setImage(attrs).run();
 
       const permanentUrl = await uploadImage(file);
-      if (!/^https:\/\//i.test(String(permanentUrl || ""))) throw new Error("Media storage did not return a permanent HTTPS URL");
+      if (!isPermanentHttpsUrl(permanentUrl)) throw new Error("Media storage did not return a permanent HTTPS URL");
+
       const match = findUploadNode(uploadId);
-      if (!match) return;
-      const tr = active.state.tr.setNodeMarkup(match.pos, undefined, {
+      if (!match) throw new Error("The upload placeholder could not be found");
+      active.view.dispatch(active.state.tr.setNodeMarkup(match.pos, undefined, {
         ...match.node.attrs,
         src: permanentUrl,
         uploadId: null,
         uploadStatus: "ready",
-      });
-      active.view.dispatch(tr);
+      }));
       message.success(t("Image uploaded and inserted"));
     } catch (error: any) {
       const match = findUploadNode(uploadId);
-      if (match) editorRef.current?.view.dispatch(editorRef.current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
+      if (match) {
+        const current = editorRef.current;
+        current?.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
+      }
       message.error(error?.message || t("Image upload failed"));
     } finally {
-      setPendingUploads((count) => Math.max(0, count - 1));
+      pendingUploadsRef.current = Math.max(0, pendingUploadsRef.current - 1);
+      setPendingUploads(pendingUploadsRef.current);
+      if (pendingUploadsRef.current === 0 && !aiBusyRef.current) {
+        suppressPersistRef.current = false;
+        persistEditor(editorRef.current);
+      }
       if (inputRef.current) inputRef.current.value = "";
     }
   };
@@ -306,6 +444,8 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
       AdvancedTableCell,
       TableHeader,
       MediaEmbed,
+      LinkCard,
+      AiDraft,
     ],
     content: cleanIncomingDocument(value),
     onCreate: ({ editor: active }) => {
@@ -314,18 +454,21 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
     onSelectionUpdate: () => setSelectionTick((tick) => tick + 1),
     onUpdate: ({ editor: active }) => {
       editorRef.current = active;
-      const json = active.getJSON();
-      if (documentHasTemporaryMedia(json)) return;
-      onChange(JSON.stringify(json), active.getHTML());
 
       const { $from } = active.state.selection;
       const text = $from.parent.isTextblock ? $from.parent.textContent.trim() : "";
-      if (text === "/ai" || text === "++") {
+      if ((text === "/ai" || text === "++") && !aiBusyRef.current) {
         const from = $from.start();
         const to = $from.end();
+        suppressPersistRef.current = true;
         active.view.dispatch(active.state.tr.delete(from, to));
+        suppressPersistRef.current = false;
         setAiReady(true);
+        setAiPromptOpen(true);
+        return;
       }
+
+      persistEditor(active);
     },
     editorProps: {
       attributes: {
@@ -340,11 +483,16 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
           files.forEach((file) => void queueImageUpload(file));
           return true;
         }
+
         const plain = event.clipboardData?.getData("text/plain")?.trim() || "";
-        const embed = plain && !plain.includes("\n") ? mediaEmbedFromUrl(plain) : null;
-        if (embed) {
+        const target = plain && !plain.includes("\n") ? mediaTargetFromUrl(plain) : null;
+        if (target && target.provider !== "external") {
           event.preventDefault();
-          editorRef.current?.chain().focus().insertContent({ type: "mediaEmbed", attrs: embed }).run();
+          if (target.kind === "embed") {
+            editorRef.current?.chain().focus().insertContent({ type:"mediaEmbed", attrs:target }).run();
+          } else {
+            editorRef.current?.chain().focus().insertContent({ type:"linkCard", attrs:target }).run();
+          }
           return true;
         }
         return false;
@@ -361,9 +509,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
       handleKeyDown: (view, event) => {
         if (event.key !== " ") return false;
         const { $from, empty } = view.state.selection;
-        if (empty && $from.parent.isTextblock && $from.parent.content.size === 0) {
-          setAiReady(true);
-        }
+        if (empty && $from.parent.isTextblock && $from.parent.content.size === 0) setAiReady(true);
         return false;
       },
     },
@@ -372,11 +518,11 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
   useEffect(() => {
     if (!editor) return;
     editorRef.current = editor;
-    if (editor.isFocused || pendingUploads > 0) return;
+    if (editor.isFocused || pendingUploadsRef.current > 0 || aiBusyRef.current) return;
     const incoming = cleanIncomingDocument(value);
     const incomingJson = typeof incoming === "string" ? incoming : JSON.stringify(incoming);
     if (JSON.stringify(editor.getJSON()) !== incomingJson) editor.commands.setContent(incoming, { emitUpdate: false });
-  }, [editor, value, pendingUploads]);
+  }, [editor, value]);
 
   useEffect(() => () => aiAbortRef.current?.abort(), []);
 
@@ -386,73 +532,151 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
   const selectedText = selection.empty ? "" : editor.state.doc.textBetween(selection.from, selection.to, "\n").trim();
   const showAiBar = aiReady || !!selectedText || aiBusy;
 
-  const addLink = () => {
-    const current = editor.getAttributes("link").href || "https://";
-    const href = window.prompt(t("Enter the official link"), current);
-    if (href === null) return;
-    if (!href.trim()) editor.chain().focus().unsetLink().run();
-    else editor.chain().focus().extendMarkRange("link").setLink({ href: href.trim() }).run();
+  const openLinkModal = () => {
+    const current = String(editor.getAttributes("link").href || "");
+    setLinkValue(current);
+    setLinkText(selection.empty ? "" : selectedText);
+    setLinkModalOpen(true);
   };
 
-  const addEmbed = () => {
-    const raw = window.prompt(t("Paste a YouTube, X, or TikTok URL"), "https://");
-    if (!raw) return;
-    const embed = mediaEmbedFromUrl(raw);
-    if (!embed) return message.error(t("This media URL is not supported"));
-    editor.chain().focus().insertContent({ type: "mediaEmbed", attrs: embed }).run();
+  const applyLink = () => {
+    const href = normalizeUserUrl(linkValue);
+    if (!href) {
+      message.error(t("Enter a valid web, email, or telephone link"));
+      return;
+    }
+    if (selection.empty) {
+      const label = linkText.trim() || href.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+      editor.chain().focus().insertContent({
+        type:"text",
+        text:label,
+        marks:[{ type:"link", attrs:{ href, target:"_blank", rel:"noopener noreferrer" } }],
+      }).run();
+    } else {
+      editor.chain().focus().extendMarkRange("link").setLink({ href, target:"_blank", rel:"noopener noreferrer" }).run();
+    }
+    setLinkModalOpen(false);
+  };
+
+  const applyMedia = () => {
+    const target = mediaTargetFromUrl(mediaValue);
+    if (!target) {
+      message.error(t("Enter a valid URL. You can paste links with or without https://"));
+      return;
+    }
+    if (target.kind === "embed") editor.chain().focus().insertContent({ type:"mediaEmbed", attrs:target }).run();
+    else editor.chain().focus().insertContent({ type:"linkCard", attrs:target }).run();
+    setMediaModalOpen(false);
+    setMediaValue("");
   };
 
   const runAI = async (action: EditorAiAction, customPrompt = "") => {
-    if (aiBusy) return;
-    const activeSelection = editor.state.selection;
-    const original = activeSelection.empty ? "" : editor.state.doc.textBetween(activeSelection.from, activeSelection.to, "\n");
+    if (aiBusyRef.current) return;
+    const active = editorRef.current;
+    if (!active) return;
+
+    const activeSelection = active.state.selection;
+    const original = activeSelection.empty ? "" : active.state.doc.textBetween(activeSelection.from, activeSelection.to, "\n");
     if (!original && !["ask", "extend"].includes(action)) {
       message.info(t("Select text for this AI action"));
       return;
     }
-    let prompt = customPrompt;
+
+    let prompt = customPrompt.trim();
     if (action === "ask" && !prompt) {
-      prompt = window.prompt(t("What should AI write or change?"), "") || "";
-      if (!prompt.trim()) return;
+      setAiPromptOpen(true);
+      return;
     }
+
+    const draftId = crypto.randomUUID();
+    let replaceFrom = activeSelection.from;
+    let replaceTo = activeSelection.to;
+    if (activeSelection.empty && activeSelection.$from.parent.isTextblock && activeSelection.$from.parent.content.size === 0 && activeSelection.$from.depth >= 1) {
+      replaceFrom = activeSelection.$from.before(1);
+      replaceTo = replaceFrom + activeSelection.$from.parent.nodeSize;
+    }
+
+    const previewPos = afterTopLevelBlock(active, activeSelection.to);
+    const fullText = active.getText();
+    const context = fullText.slice(Math.max(0, activeSelection.from - 3500), Math.min(fullText.length, activeSelection.to + 3500));
 
     const controller = new AbortController();
     aiAbortRef.current?.abort();
     aiAbortRef.current = controller;
+    aiBusyRef.current = true;
+    suppressPersistRef.current = true;
     setAiBusy(true);
     setAiReady(false);
-    const from = activeSelection.from;
-    let insertPos = from;
-    let generated = "";
+    setAiStatus(t("AI is preparing rich content"));
+
+    active.chain().focus().insertContentAt(previewPos, {
+      type:"aiDraft",
+      attrs:{ draftId, text:"", status:"streaming" },
+    }).run();
+
+    let draftText = "";
+    let flushTimer: number | null = null;
+    const flushDraft = () => {
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      const current = editorRef.current;
+      const match = findAiDraft(draftId);
+      if (!current || !match) return;
+      current.view.dispatch(current.state.tr.setNodeMarkup(match.pos, undefined, {
+        ...match.node.attrs,
+        text:draftText,
+        status:"streaming",
+      }));
+    };
+    const queueDraftFlush = () => {
+      if (flushTimer !== null) return;
+      flushTimer = window.setTimeout(flushDraft, 70);
+    };
+
     try {
-      if (!activeSelection.empty) editor.view.dispatch(editor.state.tr.delete(activeSelection.from, activeSelection.to));
-      const fullText = editor.getText();
-      const context = fullText.slice(Math.max(0, from - 3000), Math.min(fullText.length, from + 3000));
-      await streamEditorAI(
-        { action, text: original, context, prompt, locale },
+      const result = await streamEditorAI(
+        { action, text:original, context, prompt, locale },
         (token) => {
           if (!token || controller.signal.aborted) return;
-          const current = editorRef.current;
-          if (!current) return;
-          current.view.dispatch(current.state.tr.insertText(token, insertPos));
-          insertPos += token.length;
-          generated += token;
+          draftText += token;
+          queueDraftFlush();
         },
         controller.signal,
+        (status) => setAiStatus(t(status)),
       );
-      message.success(t("AI writing inserted"));
+
+      flushDraft();
+      const current = editorRef.current;
+      const match = findAiDraft(draftId);
+      if (!current || !match) throw new Error("AI preview was interrupted");
+
+      current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
+      aiBusyRef.current = false;
+      suppressPersistRef.current = pendingUploadsRef.current > 0;
+
+      const richContent = Array.isArray(result.document?.content) && result.document.content.length
+        ? result.document.content
+        : [{ type:"paragraph", content:result.text ? [{ type:"text", text:result.text }] : [] }];
+
+      current.chain().focus().insertContentAt({ from:replaceFrom, to:replaceTo }, richContent).run();
+      persistEditor(current);
+      if (result.degraded) message.warning(t("AI completed with plain-text fallback formatting"));
+      else message.success(t("AI rich content inserted"));
     } catch (error: any) {
-      if (error?.name !== "AbortError") {
-        const current = editorRef.current;
-        if (current && original) {
-          const tr = current.state.tr.delete(from, Math.min(from + generated.length, current.state.doc.content.size)).insertText(original, from);
-          current.view.dispatch(tr);
-        }
-        message.error(error?.message || t("AI writing failed"));
-      }
+      if (flushTimer !== null) window.clearTimeout(flushTimer);
+      const current = editorRef.current;
+      const match = findAiDraft(draftId);
+      if (current && match) current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
+      if (error?.name !== "AbortError") message.error(error?.message || t("AI writing failed"));
     } finally {
+      aiBusyRef.current = false;
+      suppressPersistRef.current = pendingUploadsRef.current > 0;
       setAiBusy(false);
+      setAiStatus("");
       aiAbortRef.current = null;
+      if (!suppressPersistRef.current) persistEditor(editorRef.current);
     }
   };
 
@@ -466,14 +690,14 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
     items: [
       { key: "image", label: t("Image") },
       { key: "table", label: t("Table") },
-      { key: "embed", label: t("YouTube / X / TikTok") },
+      { key: "embed", label: t("Video / social / web link") },
       { key: "quote", label: t("Standout quote") },
       { key: "divider", label: t("Divider") },
     ],
     onClick: ({ key }: { key: string }) => {
       if (key === "image") inputRef.current?.click();
       if (key === "table") editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
-      if (key === "embed") addEmbed();
+      if (key === "embed") setMediaModalOpen(true);
       if (key === "quote") editor.chain().focus().toggleBlockquote().run();
       if (key === "divider") editor.chain().focus().setHorizontalRule().run();
     },
@@ -488,7 +712,10 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
       { key: "extend", label: t("Extend Writing") },
       { key: "ask", label: t("Custom AI Prompt…") },
     ],
-    onClick: ({ key }: { key: string }) => void runAI(key as EditorAiAction),
+    onClick: ({ key }: { key: string }) => {
+      if (key === "ask") setAiPromptOpen(true);
+      else void runAI(key as EditorAiAction);
+    },
   };
 
   const updateHoveredBlock = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -544,7 +771,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
           <Tooltip title={t("Highlight")}>
             <ColorPicker size="small" defaultValue="#fff1a8" onChangeComplete={(color) => editor.chain().focus().toggleHighlight({ color: color.toHexString() }).run()} />
           </Tooltip>
-          {tool("Link", <LinkOutlined />, addLink, editor.isActive("link"))}
+          {tool("Link", <LinkOutlined />, openLinkModal, editor.isActive("link"))}
           <Dropdown menu={insertMenu} trigger={["click"]}>
             <Button size="small" icon={<PlusOutlined />}>{t("Insert")}</Button>
           </Dropdown>
@@ -566,7 +793,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
           {showAiBar && (
             <Space size={4} wrap>
               <RobotOutlined />
-              <span>{aiBusy ? t("AI is writing…") : selectedText ? t("AI actions for selection") : t("Ask AI on this line")}</span>
+              <span>{aiBusy ? (aiStatus || t("AI is writing and formatting…")) : selectedText ? t("AI actions for selection") : t("Ask AI on this line")}</span>
               {!aiBusy && <Button size="small" onClick={() => void runAI("fix_grammar")}>{t("Fix Grammar")}</Button>}
               {!aiBusy && <Button size="small" onClick={() => void runAI("professional")}>{t("Professional")}</Button>}
               {!aiBusy && <Button size="small" onClick={() => void runAI("summarize")}>{t("Summarize")}</Button>}
@@ -621,6 +848,79 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
         )}
         <EditorContent editor={editor} />
       </div>
+
+      <Modal
+        title={t("Insert or edit link")}
+        open={linkModalOpen}
+        onOk={applyLink}
+        onCancel={() => setLinkModalOpen(false)}
+        okText={t("Apply link")}
+        destroyOnHidden
+      >
+        <Space direction="vertical" style={{ width:"100%" }}>
+          <Input
+            autoFocus
+            value={linkValue}
+            onChange={(event) => setLinkValue(event.target.value)}
+            onPressEnter={applyLink}
+            placeholder="example.com/page or https://example.com/page"
+          />
+          {selection.empty && (
+            <Input
+              value={linkText}
+              onChange={(event) => setLinkText(event.target.value)}
+              onPressEnter={applyLink}
+              placeholder={t("Link text (optional)")}
+            />
+          )}
+        </Space>
+      </Modal>
+
+      <Modal
+        title={t("Insert video, social post, or web link")}
+        open={mediaModalOpen}
+        onOk={applyMedia}
+        onCancel={() => setMediaModalOpen(false)}
+        okText={t("Insert")}
+        destroyOnHidden
+      >
+        <Space direction="vertical" style={{ width:"100%" }}>
+          <Input
+            autoFocus
+            value={mediaValue}
+            onChange={(event) => setMediaValue(event.target.value)}
+            onPressEnter={applyMedia}
+            placeholder="youtube.com/..., youtu.be/..., x.com/..., tiktok.com/..., or any web URL"
+          />
+          <span style={{ color:"#64748b", fontSize:12 }}>
+            {t("Supported videos are embedded. Short or non-embeddable links are inserted as a reliable open-link card instead of being rejected.")}
+          </span>
+        </Space>
+      </Modal>
+
+      <Modal
+        title={t("Ask AI")}
+        open={aiPromptOpen}
+        onOk={() => {
+          const prompt = aiPromptValue.trim();
+          if (!prompt) return message.info(t("Enter an instruction for AI"));
+          setAiPromptOpen(false);
+          setAiPromptValue("");
+          void runAI("ask", prompt);
+        }}
+        onCancel={() => setAiPromptOpen(false)}
+        okText={t("Generate")}
+        confirmLoading={aiBusy}
+        destroyOnHidden
+      >
+        <Input.TextArea
+          autoFocus
+          rows={5}
+          value={aiPromptValue}
+          onChange={(event) => setAiPromptValue(event.target.value)}
+          placeholder={t("Example: Turn this into a 3-column table, make the warning text red, and highlight the deadline in yellow.")}
+        />
+      </Modal>
     </div>
   );
 }
