@@ -9,7 +9,7 @@ const ALLOWED_TAGS = [
 const ALLOWED_ATTR = [
   "href", "title", "target", "rel", "src", "alt", "width", "height", "colspan", "rowspan",
   "class", "aria-label", "loading", "allow", "allowfullscreen", "referrerpolicy",
-  "data-bdg-media-embed", "data-source-url",
+  "data-bdg-media-embed", "data-bdg-link-card", "data-provider", "data-source-url",
 ];
 
 function safeEmbedUrl(value: string) {
