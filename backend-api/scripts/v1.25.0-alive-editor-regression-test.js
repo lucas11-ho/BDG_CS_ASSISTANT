@@ -7,6 +7,7 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8');
 
 const editor = read('admin-pro', 'src', 'components', 'RichKnowledgeEditor.tsx');
 const api = read('admin-pro', 'src', 'lib', 'api.ts');
+const editorUtils = read('admin-pro', 'src', 'lib', 'rich-editor-utils.ts');
 const adminStyles = read('admin-pro', 'src', 'styles.css');
 const server = read('backend-api', 'src', 'server.js');
 const editorAi = read('backend-api', 'src', 'editor-ai.js');
@@ -16,8 +17,8 @@ const guideStyles = read('guide-pro', 'src', 'styles.css');
 
 const checks = [
   ['editor has draggable block handle', editor.includes('bdg-block-drag-handle') && editor.includes('application/x-bdg-block')],
-  ['editor shows permanent upload placeholder state', editor.includes('uploadStatus: "uploading"') && editor.includes('readFileDataUrl')],
-  ['temporary image URLs are never emitted through onChange', editor.includes('documentHasTemporaryMedia(json)') && editor.includes('if (documentHasTemporaryMedia(json)) return')],
+  ['editor shows permanent upload placeholder state', editor.includes('uploadStatus: "uploading"') && editor.includes('createSmallBlurPreview')],
+  ['temporary image URLs are never emitted through onChange', editor.includes('documentHasTransientNodes(json)') && editor.includes('pendingUploadsRef.current > 0') && editor.includes('suppressPersistRef.current')],
   ['uploads require permanent HTTPS URL', editor.includes('Media storage did not return a permanent HTTPS URL')],
   ['paste and drop images share async upload pipeline', editor.includes('handlePaste') && editor.includes('handleDrop') && editor.includes('queueImageUpload')],
   ['advanced table cells accept block content', editor.includes('TableCell.extend') && editor.includes('content: "block+"')],
@@ -28,7 +29,7 @@ const checks = [
   ['AI client consumes text event stream', api.includes('/admin/editor-ai/stream') && api.includes("event === 'token'")],
   ['backend editor AI route is authenticated', server.includes('authenticatedEditorAiResponse') && server.includes("permissions.includes('content.manage')")],
   ['backend editor AI provider uses SSE', editorAi.includes('stream:true') && editorAi.includes("sseEvent('token'")],
-  ['pasted media links become structured embeds', editor.includes('mediaEmbedFromUrl') && editor.includes('youtube-nocookie.com') && editor.includes('platform.twitter.com') && editor.includes('tiktok.com/player')],
+  ['pasted media links become structured embeds', editor.includes('mediaTargetFromUrl') && editorUtils.includes('youtube-nocookie.com') && editorUtils.includes('platform.twitter.com') && editorUtils.includes('tiktok.com/player')],
   ['backend only allows approved embed hosts', rich.includes("host === 'www.youtube-nocookie.com'") && rich.includes("host === 'platform.twitter.com'") && rich.includes("host === 'www.tiktok.com'")],
   ['public sanitizer removes unsafe iframes', publicSanitizer.includes('removeUnsafeIframes') && publicSanitizer.includes('safeEmbedUrl')],
   ['Telegram-style quote is present in editor and public UI', adminStyles.includes('.bdg-telegram-quote') && guideStyles.includes('.bdg-telegram-quote')],
