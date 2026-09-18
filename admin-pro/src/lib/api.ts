@@ -1214,7 +1214,7 @@ export async function openEditorAiStream(payload: EditorAiRequest, signal?: Abor
   };
   const auth = getToken();
   if (auth) headers.Authorization = `Bearer ${auth}`;
-  const response = await fetch(`${API_BASE_URL}/admin/editor-ai/stream`, {
+  const response = await fetch(`${API_BASE_URL}/admin/ai/editor-stream`, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
