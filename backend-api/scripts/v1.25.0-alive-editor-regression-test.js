@@ -29,7 +29,7 @@ const checks = [
   ['AI client consumes text event stream', api.includes('/admin/editor-ai/stream') && api.includes("event === 'token'")],
   ['backend editor AI route is authenticated', server.includes('authenticatedEditorAiResponse') && server.includes("permissions.includes('content.manage')")],
   ['backend editor AI provider uses SSE', editorAi.includes('stream:true') && editorAi.includes("sseEvent('token'")],
-  ['pasted media links become structured embeds', editor.includes('mediaTargetFromUrl') && editorUtils.includes('youtube-nocookie.com') && editorUtils.includes('platform.twitter.com') && editorUtils.includes('tiktok.com/player')],
+  ['pasted media links become structured embeds', editor.includes('mediaTargetFromUrl') && editorUtils.includes('youtube.com/embed') && editorUtils.includes('platform.twitter.com') && editorUtils.includes('tiktok.com/player')],
   ['backend only allows approved embed hosts', rich.includes("host === 'www.youtube-nocookie.com'") && rich.includes("host === 'platform.twitter.com'") && rich.includes("host === 'www.tiktok.com'")],
   ['public sanitizer removes unsafe iframes', publicSanitizer.includes('removeUnsafeIframes') && publicSanitizer.includes('safeEmbedUrl')],
   ['Telegram-style quote is present in editor and public UI', adminStyles.includes('.bdg-telegram-quote') && guideStyles.includes('.bdg-telegram-quote')],

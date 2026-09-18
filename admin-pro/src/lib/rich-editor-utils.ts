@@ -64,7 +64,7 @@ export function mediaTargetFromUrl(raw: string): MediaTarget | null {
       kind:"embed",
       provider:"youtube",
       url:normalized,
-      embedUrl:`https://www.youtube-nocookie.com/embed/${yt}?rel=0`,
+      embedUrl:`https://www.youtube.com/embed/${yt}?rel=0&playsinline=1`,
       label:"YouTube video",
     };
   }

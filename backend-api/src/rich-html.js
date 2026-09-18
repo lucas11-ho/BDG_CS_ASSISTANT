@@ -42,7 +42,9 @@ const SANITIZE_OPTIONS = {
         const url = new URL(String(frame.attribs?.src || ''));
         const host = url.hostname.toLowerCase();
         const allowed =
-          host === 'www.youtube-nocookie.com'
+          host === 'www.youtube.com'
+          || host === 'youtube.com'
+          || host === 'www.youtube-nocookie.com'
           || host === 'youtube-nocookie.com'
           || host === 'platform.twitter.com'
           || host === 'www.tiktok.com';
