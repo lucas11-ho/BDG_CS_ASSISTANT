@@ -86,6 +86,7 @@ jobs:
           npm run test:v1230-topics-security
           npm run test:v1240-taxonomy
           npm run test:v1250-editor
+          npm run test:v1251-editor-stability
           npm run test:chat-reliability
           npm run test:security
           npm run test:structured
