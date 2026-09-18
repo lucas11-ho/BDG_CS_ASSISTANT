@@ -38,11 +38,11 @@ function instructionFor(action, prompt) {
 }
 
 function sseEvent(event, data) {
-  return \`event: \${event}\\ndata: \${JSON.stringify(data)}\\n\\n\`;
+  return `event: ${event}\\ndata: ${JSON.stringify(data)}\\n\\n`;
 }
 
 function sseComment(text = 'keep-alive') {
-  return \`: \${text}\\n\\n\`;
+  return `: ${text}\\n\\n`;
 }
 
 function trimPartialClosingTag(value, closingTag) {
@@ -56,8 +56,8 @@ function trimPartialClosingTag(value, closingTag) {
 }
 
 function sectionText(raw, name, partial = false) {
-  const open = \`<\${name}>\`;
-  const close = \`</\${name}>\`;
+  const open = `<${name}>`;
+  const close = `</${name}>`;
   const start = raw.indexOf(open);
   if (start < 0) return '';
   const from = start + open.length;
@@ -213,7 +213,7 @@ function richPrompt(locale) {
     'You may create tables, headings, lists, quotes, colored text, highlighted text, and combinations when requested.',
     'Do not output images, iframes, scripts, raw HTML, links, or unknown node/mark types.',
     'Do not use markdown fences around the JSON.',
-    \`Write in locale: \${locale}.\`,
+    `Write in locale: ${locale}.`,
   ].join('\\n');
 }
 
@@ -254,9 +254,9 @@ export async function streamEditorAi(request, env) {
   ].join('\\n\\n');
 
   const user = [
-    \`Task: \${instructionFor(action, payload.prompt)}\`,
-    selectedText ? \`Selected text:\\n\${selectedText}\` : '',
-    surroundingText ? \`Nearby document context:\\n\${surroundingText}\` : '',
+    `Task: ${instructionFor(action, payload.prompt)}`,
+    selectedText ? `Selected text:\\n${selectedText}` : '',
+    surroundingText ? `Nearby document context:\\n${surroundingText}` : '',
   ].filter(Boolean).join('\\n\\n');
 
   const apiBase = String(env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\\/$/, '');
@@ -296,11 +296,11 @@ export async function streamEditorAi(request, env) {
         totalTimer = setTimeout(() => controller.abort(), 120000);
         resetInactivity();
 
-        provider = await fetch(\`\${apiBase}/chat/completions\`, {
+        provider = await fetch(`${apiBase}/chat/completions`, {
           method:'POST',
           signal:controller.signal,
           headers:{
-            Authorization:\`Bearer \${env.DEEPSEEK_API_KEY}\`,
+            Authorization:`Bearer ${env.DEEPSEEK_API_KEY}`,
             'Content-Type':'application/json',
             Accept:'text/event-stream',
           },
@@ -317,7 +317,7 @@ export async function streamEditorAi(request, env) {
         if (!provider.ok || !provider.body) {
           const detail = await provider.text().catch(() => '');
           send(sseEvent('error', {
-            error:\`AI provider returned HTTP \${provider.status}\`,
+            error:`AI provider returned HTTP ${provider.status}`,
             detail:detail.slice(0,220),
             code:'EDITOR_AI_PROVIDER_ERROR',
           }));
