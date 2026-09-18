@@ -15,7 +15,7 @@ const SANITIZE_OPTIONS = {
     a: ['href', 'target', 'rel', 'title', 'class'],
     img: ['src', 'alt', 'title', 'width', 'height', 'loading', 'class'],
     iframe: ['src', 'title', 'loading', 'allow', 'allowfullscreen', 'referrerpolicy', 'class'],
-    div: ['style', 'class', 'data-bdg-media-embed', 'data-source-url'],
+    div: ['style', 'class', 'data-bdg-media-embed', 'data-bdg-link-card', 'data-provider', 'data-source-url'],
     th: ['colspan', 'rowspan', 'scope', 'style', 'class'],
     td: ['colspan', 'rowspan', 'style', 'class'],
     p: ['style', 'class'],
