@@ -1194,6 +1194,91 @@ export const api = {
   },
 };
 
+export type EditorAiAction = "custom" | "fix_grammar" | "professional" | "casual" | "summarize" | "extend";
+export type EditorAiRequest = {
+  action: EditorAiAction;
+  selected_text?: string;
+  prompt?: string;
+  context_before?: string;
+  context_after?: string;
+  locale?: string;
+};
+export type EditorAiStreamPacket = { event: string; data: Record<string, any> };
+
+export async function openEditorAiStream(payload: EditorAiRequest, signal?: AbortSignal) {
+  if (!API_BASE_URL) throw new Error("Admin API is not configured. Set VITE_API_BASE_URL during the production build.");
+  const headers: Record<string, string> = {
+    Accept: "text/event-stream",
+    "Content-Type": "application/json",
+    ...platformHeaders(),
+  };
+  const auth = getToken();
+  if (auth) headers.Authorization = `Bearer ${auth}`;
+  const response = await fetch(`${API_BASE_URL}/admin/editor-ai/stream`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+    cache: "no-store",
+    signal,
+  });
+  if (response.status === 401) {
+    logout();
+    throw new Error("Unauthorized. Please login again.");
+  }
+  if (!response.ok || !response.body) {
+    let detail = "";
+    try {
+      const body = await response.json();
+      detail = body?.error || body?.message || "";
+    } catch {
+      detail = await response.text().catch(() => "");
+    }
+    throw new Error(detail || `AI editor stream failed (${response.status})`);
+  }
+  return response;
+}
+
+export async function consumeEditorAiStream(
+  response: Response,
+  onPacket: (packet: EditorAiStreamPacket) => void,
+  signal?: AbortSignal,
+) {
+  if (!response.body) throw new Error("AI stream body is unavailable");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (!signal?.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      while (true) {
+        const match = buffer.match(/\r?\n\r?\n/);
+        if (!match || match.index === undefined) break;
+        const boundary = match.index;
+        const block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + match[0].length);
+        let event = "message";
+        const data: string[] = [];
+        for (const line of block.split(/\r?\n/)) {
+          if (!line || line.startsWith(":")) continue;
+          if (line.startsWith("event:")) event = line.slice(6).trim() || "message";
+          else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+        }
+        if (!data.length) continue;
+        try {
+          onPacket({ event, data: JSON.parse(data.join("\n")) });
+        } catch {
+          onPacket({ event, data: { text: data.join("\n") } });
+        }
+      }
+    }
+  } finally {
+    try { await reader.cancel(); } catch {}
+    try { reader.releaseLock(); } catch {}
+  }
+}
+
 export type AdminSupportStreamPacket = { id?: string; event: string; data: Record<string, any> };
 export async function openAdminSupportConversationStream(conversationId: number, afterSequence = 0, signal?: AbortSignal) {
   if (!API_BASE_URL) throw new Error("Admin API is not configured. Set VITE_API_BASE_URL during the production build.");
