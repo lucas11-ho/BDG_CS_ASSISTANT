@@ -36,7 +36,7 @@ import {
 } from './localized-categories-analytics.js';
 
 const env = getRuntimeEnv();
-const API_VERSION = '1.25.0-alive-rich-editor';
+const API_VERSION = '1.24.0-content-taxonomy-stable-faq-slugs';
 const API_FEATURES = [
   'alive-rich-editor',
   'persistent-editor-media',
