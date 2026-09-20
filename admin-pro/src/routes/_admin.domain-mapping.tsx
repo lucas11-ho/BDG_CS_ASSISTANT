@@ -100,9 +100,9 @@ function DomainMappingPage() {
 
   return <>
     <LocalizedHelp copies={{
-      en: { title: "Luke Hosting", body: "Luke provides a neutral white-label hosting layer. Use Luke Shared Hosting when the client does not want to buy a domain. Use Custom Domain when the client wants their own hostname.", bullets: ["Shared hosting automatically gives the client Admin, Staff, Guide, and Chat links under ar-ai666.com.", "The platform route stays permanent even if the client changes their display name.", "Custom domains continue to use Cloudflare verification and automatic dynamic CORS trust."] },
+      en: { title: "Luke Hosting", body: "Luke provides a neutral white-label hosting layer. Use Luke Shared Hosting when the client does not want to buy a domain. Use Custom Domain when the client wants their own hostname.", bullets: ["Shared hosting uses the Admin, CS Workspace, Guide, and Chat origins configured for this deployment.", "The platform route stays permanent even if the client changes their display name.", "Custom domains continue to use Cloudflare verification and automatic dynamic CORS trust."] },
       zh: { title: "Luke 托管", body: "Luke 提供中立的白标托管层。客户不购买域名时使用 Luke Shared Hosting；客户需要自己的域名时使用 Custom Domain。", bullets: ["共享托管会自动生成 Admin、Staff、Guide 和 Chat 链接。", "平台路由保持稳定，不会因品牌名称修改而变化。", "自定义域名继续使用 Cloudflare 验证和动态 CORS。"] },
-      my: { title: "Luke Hosting", body: "Luke သည် client brand ကို သီးခြားစီထိန်းချုပ်နိုင်သော neutral white-label hosting layer ဖြစ်သည်။ Domain မဝယ်လိုသော client များအတွက် Luke Shared Hosting ကို အသုံးပြုပါ။", bullets: ["Admin၊ Staff၊ Guide နှင့် Chat link များကို ar-ai666.com အောက်တွင် အလိုအလျောက်ရရှိမည်။", "Platform route သည် brand name ပြောင်းသော်လည်း မပြောင်းပါ။", "Custom Domain များအတွက် Cloudflare verification နှင့် dynamic CORS ကို ဆက်သုံးမည်။"] },
+      my: { title: "Luke Hosting", body: "Luke သည် client brand ကို သီးခြားစီထိန်းချုပ်နိုင်သော neutral white-label hosting layer ဖြစ်သည်။ Domain မဝယ်လိုသော client များအတွက် Luke Shared Hosting ကို အသုံးပြုပါ။", bullets: ["Shared hosting သည် deployment တွင် သတ်မှတ်ထားသော Admin၊ CS Workspace၊ Guide နှင့် Chat origin များကို အသုံးပြုသည်။", "Platform route သည် brand name ပြောင်းသော်လည်း မပြောင်းပါ။", "Custom Domain များအတွက် Cloudflare verification နှင့် dynamic CORS ကို ဆက်သုံးမည်။"] },
     }} />
 
     <Card loading={loading} title="Hosting Mode">
@@ -118,12 +118,16 @@ function DomainMappingPage() {
     </Card>
 
     <Card loading={loading} title={<Space><GlobalOutlined />Luke Shared Hosting links</Space>} extra={<Space><Button icon={<ReloadOutlined />} onClick={() => void load()}>Refresh</Button><Button type="primary" loading={busy} onClick={() => void generate()}>Refresh links</Button></Space>} style={{ marginTop: 12 }}>
-      <Alert showIcon type="success" message="One shared domain set for every client" description="The four ar-ai666.com subdomains are configured once. New clients are separated by their immutable /p/<platform-route> path." style={{ marginBottom: 12 }} />
+      <Alert showIcon type="success" message="One shared domain set for every client" description="Generated links use the effective shared origins configured for this deployment. New clients are separated by their immutable /p/<platform-route> path." style={{ marginBottom: 12 }} />
       {data ? <Descriptions bordered column={1}>
         {linkRow("Admin", data.generated?.admin)}
         {linkRow("CS Workspace", data.generated?.staff)}
         {linkRow("Guide", data.generated?.guide)}
         {linkRow("Chat", data.generated?.chat)}
+        <Descriptions.Item label="Effective Admin origin"><Typography.Text code>{data.shared_hosting?.origins?.admin || "—"}</Typography.Text></Descriptions.Item>
+        <Descriptions.Item label="Effective CS Workspace origin"><Typography.Text code>{data.shared_hosting?.origins?.staff || "—"}</Typography.Text></Descriptions.Item>
+        <Descriptions.Item label="Effective Guide origin"><Typography.Text code>{data.shared_hosting?.origins?.guide || "—"}</Typography.Text></Descriptions.Item>
+        <Descriptions.Item label="Effective Chat origin"><Typography.Text code>{data.shared_hosting?.origins?.chat || "—"}</Typography.Text></Descriptions.Item>
         <Descriptions.Item label="Platform route"><Typography.Text code>{data.platform?.route_prefix || "—"}</Typography.Text></Descriptions.Item>
         <Descriptions.Item label="Client DNS required"><Tag color="green">No</Tag></Descriptions.Item>
         <Descriptions.Item label="Per-client CORS change"><Tag color="green">No</Tag></Descriptions.Item>
