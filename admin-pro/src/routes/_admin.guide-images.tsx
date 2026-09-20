@@ -22,12 +22,15 @@ import {
   message,
 } from "antd";
 import {
+  CheckCircleOutlined,
   DeleteOutlined,
   EditOutlined,
   GlobalOutlined,
   PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
+  SearchOutlined,
+  StopOutlined,
   UploadOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
@@ -105,6 +108,12 @@ function emptyTranslation(locale: Locale) {
   };
 }
 
+async function inChunks<T>(items: T[], size: number, worker: (item: T) => Promise<unknown>) {
+  for (let index = 0; index < items.length; index += size) {
+    await Promise.all(items.slice(index, index + size).map(worker));
+  }
+}
+
 function rowToTranslation(row: any, locale: Locale) {
   return {
     ...emptyTranslation(locale),
@@ -129,6 +138,13 @@ function VisualGuideStudio() {
   const [activeLocale, setActiveLocale] = useState("");
   const [editorJson, setEditorJson] = useState(EMPTY_DOC);
   const [editorHtml, setEditorHtml] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [topicFilter, setTopicFilter] = useState<number | undefined>();
+  const [tagFilter, setTagFilter] = useState<number | undefined>();
+  const [localeFilter, setLocaleFilter] = useState<string | undefined>();
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [form] = Form.useForm();
   const selectedCategoryId = Form.useWatch("category_id", form);
 
@@ -156,7 +172,21 @@ function VisualGuideStudio() {
         api.getGuideLocaleStudio(),
         api.getPlatformContext(),
       ]);
-      setRows(guides as any[]);
+      const studioRows = Array.isArray((registry as any)?.guides) ? (registry as any).guides : [];
+      const studioById = new Map(studioRows.map((row: any) => [String(row.id), row]));
+      setRows((guides as any[]).map((row: any) => {
+        const studio = studioById.get(String(row.id)) as any;
+        const variants = Array.isArray(studio?.variants) ? studio.variants : [];
+        return {
+          ...row,
+          variants,
+          publication_status: studio?.publication_status || row.publication_status || row.status || "draft",
+          published_locale_count: studio?.published_locale_count ?? row.published_locale_count ?? 0,
+          enabled_locale_count: studio?.enabled_locale_count ?? row.enabled_locale_count ?? ((registry as any)?.locales?.length || 0),
+          locale_coverage: row.locale_coverage || Object.fromEntries(variants.map((variant: any) => [String(variant.locale), String(variant.status || "draft")])),
+        };
+      }));
+      setSelectedRowKeys([]);
       setCategories(categoryRows as any[]);
       setTags(tagRows as any[]);
       setButtons(actionRows as any[]);
@@ -172,6 +202,47 @@ function VisualGuideStudio() {
   };
 
   useEffect(() => { void load(); }, []);
+
+  const filteredRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return rows.filter((row) => {
+      const topics = Array.isArray(row.topics) ? row.topics : [];
+      const rowTags = Array.isArray(row.tags) ? row.tags : [];
+      const variants = Array.isArray(row.variants) ? row.variants : [];
+      const searchable = [
+        row.title,
+        row.slug,
+        row.summary,
+        row.category_name,
+        ...topics.flatMap((topic: any) => [topic.name, topic.slug]),
+        ...rowTags.flatMap((tag: any) => [tag.name, tag.slug]),
+        ...variants.map((variant: any) => variant.locale),
+      ];
+      const matchesSearch = !needle || searchable.some((value) => String(value || "").toLowerCase().includes(needle));
+      const status = String(row.publication_status || row.status || "draft");
+      const matchesStatus = !statusFilter || status === statusFilter;
+      const topicIds = (row.topic_ids || topics.map((topic: any) => topic.id)).map(Number);
+      const matchesTopic = !topicFilter || topicIds.includes(Number(topicFilter));
+      const tagIds = (row.tag_ids || rowTags.map((tag: any) => tag.id)).map(Number);
+      const matchesTag = !tagFilter || tagIds.includes(Number(tagFilter));
+      const matchesLocale = !localeFilter || variants.some((variant: any) => String(variant.locale) === localeFilter);
+      return matchesSearch && matchesStatus && matchesTopic && matchesTag && matchesLocale;
+    });
+  }, [rows, search, statusFilter, topicFilter, tagFilter, localeFilter]);
+
+  const selectedRows = useMemo(() => {
+    const keys = new Set(selectedRowKeys.map(String));
+    return rows.filter((row) => keys.has(String(row.id)));
+  }, [rows, selectedRowKeys]);
+
+  const clearFilters = () => {
+    setSearch("");
+    setStatusFilter(undefined);
+    setTopicFilter(undefined);
+    setTagFilter(undefined);
+    setLocaleFilter(undefined);
+  };
+  const selectAllFiltered = () => setSelectedRowKeys(filteredRows.map((row) => row.id));
 
   useEffect(() => {
     if (!editing || !activeLocale) return;
@@ -383,6 +454,47 @@ function VisualGuideStudio() {
     catch (error: any) { message.error(error?.message || "Delete failed"); }
   };
 
+  const selectedTranslationIds = () => [...new Set(selectedRows.flatMap((row) =>
+    (Array.isArray(row.variants) ? row.variants : []).map((variant: any) => Number(variant.id)).filter((id: number) => Number.isInteger(id) && id > 0)
+  ))];
+
+  const bulkPublish = async () => {
+    if (!canPublishGuides || !selectedRows.length) return;
+    const ids = selectedTranslationIds();
+    if (!ids.length) { message.info("The selected Guides do not have any saved locale documents to publish"); return; }
+    setBulkBusy(true);
+    try {
+      const result: any = await api.batchPublishGuideTranslations(ids);
+      message.success(`Published ${Number(result?.published || ids.length)} locale document(s) across ${selectedRows.length} selected Guide(s)`);
+      await load();
+    } catch (error: any) { message.error(error?.message || "Batch publish failed"); }
+    finally { setBulkBusy(false); }
+  };
+
+  const bulkMoveToDraft = async () => {
+    if (!canPublishGuides || !selectedRows.length) return;
+    const ids = selectedTranslationIds();
+    if (!ids.length) return;
+    setBulkBusy(true);
+    try {
+      await inChunks(ids, 8, (id) => api.updateGuideTranslation(id, { status: "draft" }));
+      message.success(`${selectedRows.length} selected Guide(s) moved to draft across all saved locales`);
+      await load();
+    } catch (error: any) { message.error(error?.message || "Move to draft failed"); }
+    finally { setBulkBusy(false); }
+  };
+
+  const bulkDelete = async () => {
+    if (!canPublishGuides || !selectedRows.length) return;
+    setBulkBusy(true);
+    try {
+      await api.bulkRemove("guide-images", selectedRows.map((row) => row.id));
+      message.success(`${selectedRows.length} selected Guide(s) deleted from this platform`);
+      await load();
+    } catch (error: any) { message.error(error?.message || "Batch delete failed"); }
+    finally { setBulkBusy(false); }
+  };
+
   return <>
     <div className="bdg-filters" style={{ marginBottom: 12 }}>
       <div style={{ flex: 1 }}>
@@ -392,13 +504,41 @@ function VisualGuideStudio() {
       <Button icon={<ReloadOutlined />} onClick={() => void load()}>Refresh</Button>
       <Button disabled={!canUploadGuides} type="primary" icon={<PlusOutlined />} onClick={() => void openEditor()}>Create visual guide</Button>
     </div>
+    <div className="bdg-filters" style={{ marginBottom: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <Input allowClear prefix={<SearchOutlined />} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search title, slug, topic, tag or locale" style={{ minWidth: 290, flex: "1 1 330px" }} />
+      <Select allowClear value={statusFilter} onChange={setStatusFilter} options={["published", "partially_published", "draft", "archived"].map((value) => ({ value, label: value.replaceAll("_", " ") }))} placeholder="All statuses" style={{ width: 180 }} />
+      <Select allowClear showSearch optionFilterProp="label" value={topicFilter} onChange={setTopicFilter} options={categories.map((category) => ({ value: Number(category.id), label: category.name }))} placeholder="All Guide topics" style={{ width: 200 }} />
+      <Select allowClear showSearch optionFilterProp="label" value={tagFilter} onChange={setTagFilter} options={tags.filter((tag) => tag.status === "active").map((tag) => ({ value: Number(tag.id), label: tag.name }))} placeholder="All tags" style={{ width: 180 }} />
+      <Select allowClear showSearch optionFilterProp="label" value={localeFilter} onChange={setLocaleFilter} options={locales.map((locale) => ({ value: locale.code, label: `${locale.code.toUpperCase()} — ${localeName(locale)}` }))} placeholder="All locales" style={{ width: 190 }} />
+      <Button onClick={clearFilters}>Clear filters</Button>
+    </div>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", minHeight: 42, marginBottom: 10 }}>
+      <Tag color="blue">{filteredRows.length} filtered</Tag>
+      {selectedRowKeys.length > 0 ? <>
+        <Tag color="purple">{selectedRowKeys.length} selected</Tag>
+        <Button size="small" onClick={selectAllFiltered} disabled={selectedRowKeys.length === filteredRows.length}>Select all {filteredRows.length} filtered</Button>
+        <Button size="small" onClick={() => setSelectedRowKeys([])}>Clear selection</Button>
+        <Button disabled={!canPublishGuides} size="small" type="primary" icon={<CheckCircleOutlined />} loading={bulkBusy} onClick={() => void bulkPublish()}>Publish all saved locales</Button>
+        <Button disabled={!canPublishGuides} size="small" icon={<StopOutlined />} loading={bulkBusy} onClick={() => void bulkMoveToDraft()}>Move all locales to draft</Button>
+        <Popconfirm title={`Delete ${selectedRows.length} selected Guide${selectedRows.length === 1 ? "" : "s"}?`} description="This removes the selected Guides from the current platform." okText="Delete selected" okButtonProps={{ danger: true }} onConfirm={() => void bulkDelete()}>
+          <Button disabled={!canPublishGuides} size="small" danger icon={<DeleteOutlined />} loading={bulkBusy}>Delete selected</Button>
+        </Popconfirm>
+      </> : <span style={{ color: "#8ea0bd" }}>Select Guide rows to show batch publish, draft and delete actions.</span>}
+    </div>
     {access && !canUploadGuides && <Alert showIcon type="warning" style={{ marginBottom: 12 }} message="Guide editing is read-only for this account" description="Ask a tenant owner, tenant admin, platform owner, or platform admin to upload, edit, publish, or remove Guide content." />}
     <LocalizedHelp copies={{
       en: { title: "Advanced Visual Guide Studio", body: "Guide content and motion settings are independent for every enabled platform language. Upload images, playable GIF covers, or MP4/WebM video covers, then select safe text-animation presets. A missing translation is never replaced with another platform or provider content.", bullets: ["Autoplay video is always muted so modern browsers can play it; loop and player controls are independent options.", "Typewriter, fade & blur, slide & bounce, glitch & flicker, and scribble & draw are allowlisted presets—custom scripts are never accepted.", "Visitors who prefer reduced motion receive a still, accessible experience while the Guide content remains available."] },
       zh: { title: "高级可视化指南工作室", body: "每个平台语言的指南内容和动态设置都独立保存。您可以上传图片、可播放的 GIF 封面或 MP4/WebM 视频封面，并选择安全的文字动画预设。缺少翻译时绝不会回退到其他平台或提供商内容。", bullets: ["自动播放视频会强制静音，以符合现代浏览器规则；循环播放和播放器控制可分别设置。", "打字机、淡入模糊、滑入弹跳、故障闪烁、手写绘制均为安全白名单预设，不接受自定义脚本。", "当访客启用“减少动态效果”时，页面会自动使用静态、可访问的显示方式。"] },
       my: { title: "အဆင့်မြင့် Visual Guide Studio", body: "Platform တွင် ဖွင့်ထားသော ဘာသာတစ်ခုချင်းစီအတွက် Guide အကြောင်းအရာနှင့် motion setting များကို သီးခြားသိမ်းဆည်းသည်။ ပုံ၊ လှုပ်ရှားသည့် GIF cover သို့မဟုတ် MP4/WebM video cover တင်ပြီး လုံခြုံသော စာသား animation preset ကို ရွေးနိုင်သည်။ ဘာသာပြန်မရှိလျှင် အခြား platform သို့မဟုတ် provider အကြောင်းအရာသို့ fallback မလုပ်ပါ။", bullets: ["Browser များတွင် autoplay အလုပ်လုပ်စေရန် video ကို muted အဖြစ် အလိုအလျောက်ထားပြီး loop နှင့် controls ကို သီးခြားရွေးနိုင်သည်။", "Typewriter၊ fade & blur၊ slide & bounce၊ glitch & flicker နှင့် scribble & draw တို့သည် ခွင့်ပြုထားသော preset များသာဖြစ်ပြီး custom script များကို လက်မခံပါ။", "Reduced motion ကို သုံးသော visitor များအတွက် animation ကို ရပ်ပြီး Guide အကြောင်းအရာကို ရှင်းလင်းစွာ ဆက်လက်ပြသမည်။"] },
     }} />
-    <Table rowKey="id" loading={loading} dataSource={rows} pagination={{ pageSize: 20 }} columns={[
+    <Table
+      rowKey="id"
+      loading={loading}
+      dataSource={filteredRows}
+      rowSelection={{ selectedRowKeys, onChange: (keys) => setSelectedRowKeys(keys as Array<string | number>), preserveSelectedRowKeys: true }}
+      pagination={{ defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], showTotal: (total) => `${total} Guide${total === 1 ? "" : "s"}` }}
+      scroll={{ x: 1280 }}
+      columns={[
       { title: "Guide", render: (_: any, row: any) => <div><b>{row.title}</b><div style={{ color: "#8ea0bd", fontSize: 12 }}>{row.slug}</div></div> },
       { title: "Available locales", dataIndex: "locale_coverage", render: (coverage: any) => <Space wrap>{Object.entries(coverage || {}).map(([code, status]: any) => <Tag key={code} color={status === "published" ? "green" : "gold"}>{code} · {status}</Tag>)}</Space> },
       { title: "Topics", width: 260, render: (_: any, row: any) => <Space wrap>{(row.topics?.length ? row.topics : [{ name: row.category_name || "—", is_primary: true }]).map((topic: any) => <Tag key={`${row.id}-${topic.id || topic.name}`} color={topic.is_primary ? "blue" : "default"}>{topic.name || topic.slug}{topic.is_primary ? " · primary" : ""}</Tag>)}</Space> },

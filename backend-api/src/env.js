@@ -42,10 +42,14 @@ export function getRuntimeEnv(source = process.env) {
     JWT_SECRET: source.JWT_SECRET || '',
     ALLOWED_ORIGINS: source.ALLOWED_ORIGINS || '',
     LUKE_SHARED_HOSTING_ENABLED: booleanValue(source.LUKE_SHARED_HOSTING_ENABLED, true),
-    LUKE_SHARED_ADMIN_ORIGIN: source.LUKE_SHARED_ADMIN_ORIGIN || 'https://admin.ar-ai666.com',
-    LUKE_SHARED_STAFF_ORIGIN: source.LUKE_SHARED_STAFF_ORIGIN || 'https://cs.ar-ai666.com',
-    LUKE_SHARED_GUIDE_ORIGIN: source.LUKE_SHARED_GUIDE_ORIGIN || 'https://guide.ar-ai666.com',
-    LUKE_SHARED_CHAT_ORIGIN: source.LUKE_SHARED_CHAT_ORIGIN || 'https://chat.ar-ai666.com',
+    // Prefer the explicit Luke shared-origin variables. Keep the earlier *_BASE_URL
+    // names as a compatibility fallback before applying product defaults; otherwise
+    // getRuntimeEnv would populate a default LUKE_SHARED_* value and silently mask a
+    // configured Admin/Guide/Chat/Staff base URL.
+    LUKE_SHARED_ADMIN_ORIGIN: source.LUKE_SHARED_ADMIN_ORIGIN || source.ADMIN_BASE_URL || 'https://admin.ar-ai666.com',
+    LUKE_SHARED_STAFF_ORIGIN: source.LUKE_SHARED_STAFF_ORIGIN || source.STAFF_BASE_URL || 'https://cs.ar-ai666.com',
+    LUKE_SHARED_GUIDE_ORIGIN: source.LUKE_SHARED_GUIDE_ORIGIN || source.GUIDE_BASE_URL || 'https://guide.ar-ai666.com',
+    LUKE_SHARED_CHAT_ORIGIN: source.LUKE_SHARED_CHAT_ORIGIN || source.CHAT_BASE_URL || 'https://chat.ar-ai666.com',
     SUPPORT_LINK: source.SUPPORT_LINK || '',
     DEEPSEEK_API_KEY: source.DEEPSEEK_API_KEY || '',
     DEEPSEEK_API_BASE: source.DEEPSEEK_API_BASE || 'https://api.deepseek.com',
