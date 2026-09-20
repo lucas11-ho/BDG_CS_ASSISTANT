@@ -28,7 +28,7 @@ test('v1.17.2 Luke Shared Hosting foundation remains active', core.includes('luk
 test('backend package version is current v1.18.0', backendPackage.version === '1.18.0');
 test('migration 045 adds hosting mode', migration.includes('hosting_mode VARCHAR(30)') && migration.includes("'luke_shared','custom_domain'"));
 test('migration 045 preserves existing public route keys', !migration.includes('SET public_route_key='));
-test('Luke shared Admin origin defaults to ar-ai666.com', env.includes("LUKE_SHARED_ADMIN_ORIGIN: source.LUKE_SHARED_ADMIN_ORIGIN || 'https://admin.ar-ai666.com'"));
+test('Luke shared Admin origin keeps its default while honoring a configured legacy Admin base URL', env.includes("source.LUKE_SHARED_ADMIN_ORIGIN || source.ADMIN_BASE_URL || 'https://admin.ar-ai666.com'"));
 test('Luke shared CS Workspace origin defaults to ar-ai666.com', env.includes("'https://cs.ar-ai666.com'"));
 test('Luke shared Guide origin defaults to ar-ai666.com', env.includes("'https://guide.ar-ai666.com'"));
 test('Luke shared Chat origin defaults to ar-ai666.com', env.includes("'https://chat.ar-ai666.com'"));
