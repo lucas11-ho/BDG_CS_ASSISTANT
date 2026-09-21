@@ -476,7 +476,7 @@ async function openWriterStream(env, messages, maxTokens, signal) {
 
 export async function streamEditorAi(request, env) {
   if (String(env.AI_MODE_ENABLED).toLowerCase() === 'false' || !env.DEEPSEEK_API_KEY) {
-    return new Response(JSON.stringify({ ok:false, error:'AI writing assistant is not configured', code:'EDITOR_AI_UNAVAILABLE' }), {
+    return new Response(JSON.stringify({ ok:false, error:'AI Writer is not configured', code:'EDITOR_AI_UNAVAILABLE' }), {
       status:503,
       headers:{ 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store' },
     });
@@ -492,31 +492,27 @@ export async function streamEditorAi(request, env) {
   }
 
   const action = ACTIONS.has(String(payload.action || '')) ? String(payload.action) : 'ask';
-  const selectedText = bounded(payload.text, 12000);
-  const surroundingText = bounded(payload.context, 7000);
+  const selectedText = bounded(payload.text, 16000);
+  const surroundingText = bounded(payload.context, 12000);
+  const prompt = bounded(payload.prompt, 10000);
   const locale = bounded(payload.locale, 40) || 'en';
-  if (!selectedText && action !== 'ask' && action !== 'extend') {
-    return new Response(JSON.stringify({ ok:false, error:'Select text before using this AI action', code:'EDITOR_AI_TEXT_REQUIRED' }), {
+  const documentContext = safeContext(payload.documentContext);
+
+  if (!selectedText && ['rewrite', 'fix_grammar', 'professional', 'casual', 'shorten', 'summarize', 'steps', 'bullets', 'table', 'translate'].includes(action)) {
+    return new Response(JSON.stringify({ ok:false, error:'Select text before using this AI edit action', code:'EDITOR_AI_TEXT_REQUIRED' }), {
       status:400,
       headers:{ 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store' },
     });
   }
 
-  const system = [
-    'You are the native AI writing and formatting assistant inside the BDG Rich Editor.',
-    'Never invent account, payment, bonus, policy, security, or operational facts.',
-    'Use only facts present in the selected text or nearby document context.',
-    'Follow the requested transformation and formatting precisely.',
-    richPrompt(locale),
-  ].join('\n\n');
-
+  const context = contextText(documentContext);
   const user = [
-    `Task: ${instructionFor(action, payload.prompt)}`,
-    selectedText ? `Selected text:\n${selectedText}` : '',
-    surroundingText ? `Nearby document context:\n${surroundingText}` : '',
-  ].filter(Boolean).join('\n\n');
+    'Task: ' + instructionFor(action, prompt),
+    context ? '\nDocument context:\n' + context : '',
+    selectedText ? '\nSelected text:\n' + selectedText : '',
+    surroundingText ? '\nNearby document text:\n' + surroundingText : '',
+  ].filter(Boolean).join('\n');
 
-  const apiBase = String(env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\/$/, '');
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const controller = new AbortController();
@@ -525,7 +521,6 @@ export async function streamEditorAi(request, env) {
 
   const body = new ReadableStream({
     async start(output) {
-      let provider;
       let reader;
       let heartbeat;
       let inactivity;
@@ -540,52 +535,38 @@ export async function streamEditorAi(request, env) {
         if (closed) return;
         try { output.enqueue(encoder.encode(value)); } catch { closed = true; }
       };
-      const inactivityMs = Math.max(30000, Math.min(Number(env.DEEPSEEK_TIMEOUT_MS || 15000) * 3, 60000));
       const resetInactivity = () => {
         clearTimeout(inactivity);
-        inactivity = setTimeout(() => controller.abort(), inactivityMs);
+        inactivity = setTimeout(() => controller.abort(), 75000);
       };
+      const onStatus = (message) => send(sseEvent('status', { message }));
 
       try {
-        send(sseEvent('start', { action, mode:'rich' }));
-        send(sseEvent('status', { message:'AI is preparing rich content' }));
+        const budget = tokenBudget(action, prompt, selectedText);
+        send(sseEvent('start', {
+          action,
+          mode:CREATIVE_ACTIONS.has(action) ? 'writer' : 'editor',
+          token_budget:budget,
+        }));
+        onStatus(CREATIVE_ACTIONS.has(action) ? 'AI Writer is composing' : 'AI is editing your content');
         heartbeat = setInterval(() => send(sseComment()), 8000);
-        totalTimer = setTimeout(() => controller.abort(), 120000);
+        totalTimer = setTimeout(() => controller.abort(), 180000);
         resetInactivity();
 
-        provider = await fetch(`${apiBase}/chat/completions`, {
-          method:'POST',
-          signal:controller.signal,
-          headers:{
-            Authorization:`Bearer ${env.DEEPSEEK_API_KEY}`,
-            'Content-Type':'application/json',
-            Accept:'text/event-stream',
-          },
-          body:JSON.stringify({
-            model:env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
-            messages:[{ role:'system', content:system }, { role:'user', content:user }],
-            temperature:action === 'casual' ? 0.4 : 0.18,
-            max_tokens:2600,
-            stream:true,
-          }),
-        });
+        const provider = await openWriterStream(
+          env,
+          [
+            { role:'system', content:writerSystem(action, locale) },
+            { role:'user', content:user },
+          ],
+          budget,
+          controller.signal,
+        );
         resetInactivity();
-
-        if (!provider.ok || !provider.body) {
-          const detail = await provider.text().catch(() => '');
-          send(sseEvent('error', {
-            error:`AI provider returned HTTP ${provider.status}`,
-            detail:detail.slice(0,220),
-            code:'EDITOR_AI_PROVIDER_ERROR',
-          }));
-          return;
-        }
-
         reader = provider.body.getReader();
-        let providerBuffer = '';
-        let rawOutput = '';
-        let emittedDraftLength = 0;
 
+        let providerBuffer = '';
+        let generatedText = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -603,44 +584,38 @@ export async function streamEditorAi(request, env) {
               const parsed = JSON.parse(data);
               const delta = String(parsed?.choices?.[0]?.delta?.content || '');
               if (!delta) continue;
-              rawOutput += delta;
-              const draft = sectionText(rawOutput, 'draft', true);
-              if (draft.length > emittedDraftLength) {
-                const text = draft.slice(emittedDraftLength);
-                emittedDraftLength = draft.length;
-                send(sseEvent('token', { text }));
-              }
-            } catch {
-              // Ignore malformed provider frames and continue consuming the stream.
-            }
+              generatedText += delta;
+              send(sseEvent('token', { text:delta }));
+            } catch {}
           }
         }
 
-        const finalDraft = sectionText(rawOutput, 'draft', false).trim() || bounded(rawOutput, 30000);
-        const richText = sectionText(rawOutput, 'rich', false).trim();
-        let document;
-        let degraded = false;
-        try {
-          document = normalizeRichDocument(JSON.parse(richText), finalDraft);
-        } catch {
-          document = plainParagraph(finalDraft);
-          degraded = true;
-        }
+        generatedText = generatedText.trim();
+        if (!generatedText) throw new Error('AI Writer finished without returning content');
 
-        if (emittedDraftLength === 0 && finalDraft) {
-          send(sseEvent('token', { text:finalDraft }));
-        }
+        onStatus('AI is formatting rich content');
+        resetInactivity();
+        const rich = await formatRichDocument(env, generatedText, prompt, locale, controller.signal, onStatus);
+        resetInactivity();
+
         send(sseEvent('result', {
-          text:finalDraft,
-          document,
-          degraded,
+          text:generatedText,
+          document:rich.document,
+          degraded:rich.degraded === true,
+          repaired:rich.repaired === true,
+          format_error:rich.formatError || '',
+          action,
         }));
-        send(sseEvent('done', { ok:true, degraded }));
+        send(sseEvent('done', {
+          ok:true,
+          degraded:rich.degraded === true,
+          repaired:rich.repaired === true,
+        }));
       } catch (error) {
         if (!request.signal?.aborted) {
           const timedOut = error?.name === 'AbortError';
           send(sseEvent('error', {
-            error:timedOut ? 'AI generation timed out or became inactive. Please try again.' : (error?.message || 'AI stream failed'),
+            error:timedOut ? 'AI Writer timed out or became inactive. Please try again.' : (error?.message || 'AI Writer failed'),
             code:timedOut ? 'EDITOR_AI_TIMEOUT' : 'EDITOR_AI_STREAM_FAILED',
           }));
         }
