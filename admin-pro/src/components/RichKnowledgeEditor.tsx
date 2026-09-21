@@ -143,8 +143,11 @@ const AiDraft = Node.create({
       cursor.textContent = "▋";
       dom.append(label, body, cursor);
       const paint = (current: typeof node) => {
+        const status = String(current.attrs.status || "streaming");
         body.textContent = String(current.attrs.text || "");
-        dom.dataset.status = String(current.attrs.status || "streaming");
+        dom.dataset.status = status;
+        label.textContent = status === "ready" ? "AI draft ready" : "AI Writer";
+        cursor.hidden = status === "ready";
       };
       paint(node);
       return {
@@ -477,6 +480,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
         active.view.dispatch(active.state.tr.delete(from, to));
         suppressPersistRef.current = false;
         setAiReady(true);
+        setAiPromptAction("ask");
         setAiPromptOpen(true);
         return;
       }
