@@ -243,46 +243,235 @@ function normalizeBlock(node, depth = 0) {
   return null;
 }
 
-function plainParagraph(text) {
-  const value = String(text || '').trim().slice(0, 30000);
+function inlineFromText(text) {
+  const value = String(text || '').trim();
+  return value ? [{ type:'text', text:value.slice(0, 30000) }] : undefined;
+}
+
+function paragraph(text) {
+  const content = inlineFromText(text);
+  return { type:'paragraph', ...(content ? { content } : {}) };
+}
+
+function listItem(text) {
+  return { type:'listItem', content:[paragraph(text)] };
+}
+
+function normalizeRichDocument(value) {
+  const source = value?.type === 'doc' ? value : { type:'doc', content:Array.isArray(value?.content) ? value.content : [] };
+  const content = Array.isArray(source.content)
+    ? source.content.map((item) => normalizeBlock(item, 0)).filter(Boolean).slice(0, 180)
+    : [];
+  if (!content.length) throw new Error('Structured output did not contain usable editor blocks');
+  return { type:'doc', content };
+}
+
+function markdownFallback(source) {
+  const lines = String(source || '').replace(/\r/g, '').split('\n');
+  const content = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) { index += 1; continue; }
+
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      content.push({ type:'heading', attrs:{ level:heading[1].length }, content:inlineFromText(heading[2]) });
+      index += 1;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+        items.push(listItem(lines[index].trim().replace(/^[-*]\s+/, '')));
+        index += 1;
+      }
+      content.push({ type:'bulletList', content:items });
+      continue;
+    }
+
+    if (/^\d+[.)]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\d+[.)]\s+/.test(lines[index].trim())) {
+        items.push(listItem(lines[index].trim().replace(/^\d+[.)]\s+/, '')));
+        index += 1;
+      }
+      content.push({ type:'orderedList', attrs:{ start:1 }, content:items });
+      continue;
+    }
+
+    if (line.startsWith('> ')) {
+      const quote = [];
+      while (index < lines.length && lines[index].trim().startsWith('> ')) {
+        quote.push(lines[index].trim().slice(2));
+        index += 1;
+      }
+      content.push({ type:'blockquote', content:[paragraph(quote.join(' '))] });
+      continue;
+    }
+
+    const parseCells = (value) => value.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim());
+    const next = index + 1 < lines.length ? lines[index + 1].trim() : '';
+    if (line.includes('|') && /^\|?\s*:?-{3,}/.test(next) && next.includes('|')) {
+      const header = parseCells(line);
+      index += 2;
+      const rows = [{
+        type:'tableRow',
+        content:header.map((cell) => ({ type:'tableHeader', attrs:{ colspan:1, rowspan:1, colwidth:null }, content:[paragraph(cell)] })),
+      }];
+      while (index < lines.length && lines[index].trim() && lines[index].includes('|')) {
+        const cells = parseCells(lines[index]);
+        rows.push({
+          type:'tableRow',
+          content:header.map((_, cellIndex) => ({ type:'tableCell', attrs:{ colspan:1, rowspan:1, colwidth:null }, content:[paragraph(cells[cellIndex] || '')] })),
+        });
+        index += 1;
+      }
+      content.push({ type:'table', content:rows });
+      continue;
+    }
+
+    const paragraphLines = [line];
+    index += 1;
+    while (
+      index < lines.length
+      && lines[index].trim()
+      && !/^(#{1,4})\s+/.test(lines[index].trim())
+      && !/^[-*]\s+/.test(lines[index].trim())
+      && !/^\d+[.)]\s+/.test(lines[index].trim())
+      && !lines[index].trim().startsWith('> ')
+    ) {
+      paragraphLines.push(lines[index].trim());
+      index += 1;
+    }
+    content.push(paragraph(paragraphLines.join(' ')));
+  }
+  return { type:'doc', content:content.length ? content.slice(0, 180) : [paragraph(source)] };
+}
+
+function extractJson(text) {
+  let value = String(text || '').trim();
+  value = value.replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/i, '').trim();
+  const first = value.indexOf('{');
+  const last = value.lastIndexOf('}');
+  if (first >= 0 && last > first) value = value.slice(first, last + 1);
+  return JSON.parse(value);
+}
+
+function formatterSystem(locale) {
+  return [
+    'Convert the supplied finished writing into a TipTap/ProseMirror JSON document.',
+    'Return only one JSON object. No markdown fences, commentary, or XML.',
+    'Root must be {"type":"doc","content":[...]}.',
+    'Allowed block nodes: paragraph, heading, blockquote, bulletList, orderedList, listItem, table, tableRow, tableCell, tableHeader, horizontalRule, codeBlock.',
+    'Allowed inline nodes: text, hardBreak.',
+    'Allowed marks: bold, italic, underline, strike, textStyle, highlight.',
+    'textStyle may contain attrs.color using a 6-digit hexadecimal color.',
+    'highlight may contain attrs.color using a 6-digit hexadecimal color.',
+    'Tables must be table > tableRow > tableHeader/tableCell > block content.',
+    'Preserve all content and follow the user formatting instruction, including requested tables, headings, colors, highlights, lists, quotes, and emphasis.',
+    'Do not create images, iframes, links, scripts, HTML, or unknown nodes.',
+    'Write in locale: ' + locale + '.',
+  ].join('\n');
+}
+
+async function providerJson(env, messages, maxTokens, signal) {
+  const apiBase = String(env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\/$/, '');
+  const response = await fetch(apiBase + '/chat/completions', {
+    method:'POST',
+    signal,
+    headers:{ Authorization:'Bearer ' + env.DEEPSEEK_API_KEY, 'Content-Type':'application/json' },
+    body:JSON.stringify({
+      model:env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
+      messages,
+      temperature:0.05,
+      max_tokens:maxTokens,
+      stream:false,
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    const error = new Error('AI provider returned HTTP ' + response.status);
+    error.status = response.status;
+    error.detail = detail.slice(0, 240);
+    throw error;
+  }
+  const payload = await response.json();
+  return String(payload?.choices?.[0]?.message?.content || '');
+}
+
+async function formatRichDocument(env, generatedText, prompt, locale, signal, onStatus) {
+  const user = [
+    'Original user instruction:',
+    bounded(prompt, 10000) || '(No additional formatting instruction)',
+    '',
+    'Finished writing to format:',
+    bounded(generatedText, 50000),
+  ].join('\n');
+
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0) onStatus('AI is repairing rich formatting');
+    try {
+      const raw = await providerJson(
+        env,
+        [
+          { role:'system', content:formatterSystem(locale) + (attempt ? '\nIMPORTANT: The previous structured response was invalid. Return strict valid JSON only.' : '') },
+          { role:'user', content:user },
+        ],
+        Math.min(7500, Math.max(3500, Math.ceil(generatedText.length / 2.2))),
+        signal,
+      );
+      return { document:normalizeRichDocument(extractJson(raw)), repaired:attempt > 0, degraded:false };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
   return {
-    type:'doc',
-    content:[{
-      type:'paragraph',
-      ...(value ? { content:[{ type:'text', text:value }] } : {}),
-    }],
+    document:markdownFallback(generatedText),
+    repaired:false,
+    degraded:true,
+    formatError:lastError?.message || 'Structured formatting failed',
   };
 }
 
-function normalizeRichDocument(value, fallbackText = '') {
-  const source = value?.type === 'doc' ? value : { type:'doc', content:Array.isArray(value?.content) ? value.content : [] };
-  const content = Array.isArray(source.content)
-    ? source.content.map((item) => normalizeBlock(item, 0)).filter(Boolean).slice(0, 120)
-    : [];
-  return content.length ? { type:'doc', content } : plainParagraph(fallbackText);
-}
-
-function richPrompt(locale) {
-  return [
-    'Return exactly two sections and nothing else:',
-    '<draft>',
-    'A readable plain-text preview of the result. Do not include XML tags inside the draft.',
-    '</draft>',
-    '<rich>',
-    'A single JSON object compatible with the TipTap/ProseMirror schema described below.',
-    '</rich>',
-    '',
-    'The <rich> JSON must be: {"type":"doc","content":[...]}',
-    'Allowed block node types: paragraph, heading, blockquote, bulletList, orderedList, listItem, table, tableRow, tableCell, tableHeader, horizontalRule, codeBlock.',
-    'Allowed inline nodes: text, hardBreak.',
-    'Allowed text marks: bold, italic, underline, strike, textStyle with attrs.color, highlight with attrs.color.',
-    'Use 6-digit hexadecimal colors such as #1d4ed8 and #fff59d.',
-    'Tables must use table > tableRow > tableHeader/tableCell > paragraph (or another allowed block).',
-    'You may create tables, headings, lists, quotes, colored text, highlighted text, and combinations when requested.',
-    'Do not output images, iframes, scripts, raw HTML, links, or unknown node/mark types.',
-    'Do not use markdown fences around the JSON.',
-    `Write in locale: ${locale}.`,
-  ].join('\n');
+async function openWriterStream(env, messages, maxTokens, signal) {
+  const apiBase = String(env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\/$/, '');
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(apiBase + '/chat/completions', {
+        method:'POST',
+        signal,
+        headers:{
+          Authorization:'Bearer ' + env.DEEPSEEK_API_KEY,
+          'Content-Type':'application/json',
+          Accept:'text/event-stream',
+        },
+        body:JSON.stringify({
+          model:env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
+          messages,
+          temperature:0.35,
+          max_tokens:maxTokens,
+          stream:true,
+        }),
+      });
+      if (response.ok && response.body) return response;
+      const detail = await response.text().catch(() => '');
+      const error = new Error('AI provider returned HTTP ' + response.status);
+      error.status = response.status;
+      error.detail = detail.slice(0, 240);
+      lastError = error;
+      if (![408, 409, 425, 429, 500, 502, 503, 504].includes(response.status)) break;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+  }
+  throw lastError || new Error('AI provider request failed');
 }
 
 export async function streamEditorAi(request, env) {
