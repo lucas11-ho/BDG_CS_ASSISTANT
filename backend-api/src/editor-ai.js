@@ -39,6 +39,53 @@ function bounded(value, max) {
   return String(value || '').trim().slice(0, max);
 }
 
+function safeContext(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out = {};
+  for (const key of ['documentType', 'title', 'summary', 'platformName', 'languageLabel']) {
+    const text = bounded(value[key], key === 'summary' ? 3000 : 600);
+    if (text) out[key] = text;
+  }
+  for (const key of ['topics', 'tags']) {
+    if (Array.isArray(value[key])) out[key] = value[key].map((item) => bounded(item, 180)).filter(Boolean).slice(0, 30);
+  }
+  return out;
+}
+
+function contextText(context) {
+  const parts = [];
+  if (context.documentType) parts.push('Document type: ' + context.documentType);
+  if (context.title) parts.push('Title: ' + context.title);
+  if (context.summary) parts.push('Summary: ' + context.summary);
+  if (context.platformName) parts.push('Platform/brand: ' + context.platformName);
+  if (context.languageLabel) parts.push('Language: ' + context.languageLabel);
+  if (context.topics?.length) parts.push('Topics: ' + context.topics.join(', '));
+  if (context.tags?.length) parts.push('Tags: ' + context.tags.join(', '));
+  return parts.join('\n');
+}
+
+function tokenBudget(action, prompt, selectedText) {
+  const longForm = /\b(complete|full|detailed|comprehensive|article|guide|tutorial|documentation|long|in-depth|multiple sections|10 sections|ten sections)\b/i.test(prompt);
+  if (longForm) return 7000;
+  if (['write', 'ask', 'write_section', 'expand', 'extend'].includes(action)) return selectedText.length > 7000 ? 5500 : 4800;
+  return 2600;
+}
+
+function writerSystem(action, locale) {
+  const creative = CREATIVE_ACTIONS.has(action);
+  return [
+    'You are the AI Writer inside a professional rich-document editor.',
+    creative
+      ? 'This is a creative writing task. Follow the user instruction and write original, complete, useful content. You may create structure, explanations, examples, headings, lists, comparisons, and tables when helpful.'
+      : 'This is a transformation task. Preserve the supplied factual meaning and do not introduce unrelated claims.',
+    'Do not fabricate platform-specific policies, payment rules, bonus amounts, URLs, eligibility requirements, guarantees, or operational facts that were not supplied by the user or document context.',
+    'If exact platform-specific facts are missing, write around them without inventing them.',
+    'Use clear Markdown-style structure for headings, lists, quotes, and tables when useful. Do not output JSON.',
+    'Do not explain your process. Return only the content requested by the user.',
+    'Write in locale: ' + locale + '.',
+  ].join('\n');
+}
+
 function instructionFor(action, prompt) {
   const custom = bounded(prompt, 10000);
   if (action === 'write') return custom || 'Write polished, complete content from scratch for the requested purpose.';
