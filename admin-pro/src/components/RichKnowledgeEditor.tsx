@@ -795,18 +795,31 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
     },
   };
 
+  const aiActionOptions: Array<{ value: EditorAiAction; label: string; needsPrompt?: boolean }> = [
+    { value:"write", label:t("Write from scratch"), needsPrompt:true },
+    { value:"write_section", label:t("Write a section"), needsPrompt:true },
+    { value:"extend", label:t("Continue writing") },
+    { value:"rewrite", label:t("Rewrite selection") },
+    { value:"fix_grammar", label:t("Fix Grammar") },
+    { value:"professional", label:t("Professional Tone") },
+    { value:"casual", label:t("Friendly Tone") },
+    { value:"shorten", label:t("Shorten") },
+    { value:"expand", label:t("Expand") },
+    { value:"summarize", label:t("Summarize Selection") },
+    { value:"steps", label:t("Turn into steps") },
+    { value:"bullets", label:t("Turn into bullets") },
+    { value:"table", label:t("Turn into table") },
+    { value:"translate", label:t("Translate"), needsPrompt:true },
+    { value:"ask", label:t("Custom instruction"), needsPrompt:true },
+  ];
+
   const aiMenu = {
-    items: [
-      { key: "fix_grammar", label: t("Fix Grammar") },
-      { key: "professional", label: t("Professional Tone") },
-      { key: "casual", label: t("Casual Tone") },
-      { key: "summarize", label: t("Summarize Selection") },
-      { key: "extend", label: t("Extend Writing") },
-      { key: "ask", label: t("Custom AI Prompt…") },
-    ],
+    items: aiActionOptions.map((item) => ({ key:item.value, label:item.label })),
     onClick: ({ key }: { key: string }) => {
-      if (key === "ask") setAiPromptOpen(true);
-      else void runAI(key as EditorAiAction);
+      const action = key as EditorAiAction;
+      const option = aiActionOptions.find((item) => item.value === action);
+      if (option?.needsPrompt) openAiWriter(action);
+      else void runAI(action);
     },
   };
 
@@ -868,7 +881,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
             <Button size="small" icon={<PlusOutlined />}>{t("Insert")}</Button>
           </Dropdown>
           <Dropdown menu={aiMenu} trigger={["click"]} disabled={aiBusy}>
-            <Button size="small" type={selectedText || aiReady ? "primary" : "default"} loading={aiBusy} icon={<RobotOutlined />}>{t("Ask AI")}</Button>
+            <Button size="small" type={selectedText || aiReady || aiCandidate ? "primary" : "default"} loading={aiBusy} icon={<RobotOutlined />}>{t("AI Writer")}</Button>
           </Dropdown>
           <Divider orientation="vertical" />
           {tool("Undo", <UndoOutlined />, () => editor.chain().focus().undo().run())}
