@@ -1,11 +1,22 @@
 const ACTIONS = new Set([
   'ask',
+  'write',
+  'write_section',
+  'rewrite',
   'fix_grammar',
   'professional',
   'casual',
+  'shorten',
+  'expand',
   'summarize',
+  'steps',
+  'bullets',
+  'table',
+  'translate',
   'extend',
 ]);
+
+const CREATIVE_ACTIONS = new Set(['ask', 'write', 'write_section', 'expand', 'extend']);
 
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
 const INLINE_MARKS = new Set(['bold', 'italic', 'underline', 'strike', 'textStyle', 'highlight']);
