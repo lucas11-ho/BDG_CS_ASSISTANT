@@ -880,8 +880,18 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
           <Dropdown menu={insertMenu} trigger={["click"]}>
             <Button size="small" icon={<PlusOutlined />}>{t("Insert")}</Button>
           </Dropdown>
-          <Dropdown menu={aiMenu} trigger={["click"]} disabled={aiBusy}>
-            <Button size="small" type={selectedText || aiReady || aiCandidate ? "primary" : "default"} loading={aiBusy} icon={<RobotOutlined />}>{t("AI Writer")}</Button>
+          <Button
+            size="small"
+            type={selectedText || aiReady || aiCandidate ? "primary" : "default"}
+            loading={aiBusy}
+            icon={<RobotOutlined />}
+            onClick={() => openAiWriter()}
+            disabled={!!aiCandidate && !aiBusy}
+          >
+            {t("AI Writer")}
+          </Button>
+          <Dropdown menu={aiMenu} trigger={["click"]} disabled={aiBusy || !!aiCandidate}>
+            <Button size="small">{t("AI actions")}</Button>
           </Dropdown>
           <Divider orientation="vertical" />
           {tool("Undo", <UndoOutlined />, () => editor.chain().focus().undo().run())}
@@ -898,11 +908,29 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
           {showAiBar && (
             <Space size={4} wrap>
               <RobotOutlined />
-              <span>{aiBusy ? (aiStatus || t("AI is writing and formatting…")) : selectedText ? t("AI actions for selection") : t("Ask AI on this line")}</span>
-              {!aiBusy && <Button size="small" onClick={() => void runAI("fix_grammar")}>{t("Fix Grammar")}</Button>}
-              {!aiBusy && <Button size="small" onClick={() => void runAI("professional")}>{t("Professional")}</Button>}
-              {!aiBusy && <Button size="small" onClick={() => void runAI("summarize")}>{t("Summarize")}</Button>}
-              {aiBusy && <Button size="small" danger onClick={() => aiAbortRef.current?.abort()}>{t("Stop")}</Button>}
+              {aiCandidate ? (
+                <>
+                  <Tag color={aiCandidate.result.degraded ? "gold" : "blue"}>
+                    {aiCandidate.result.degraded ? t("AI draft · simplified formatting") : t("AI draft ready")}
+                  </Tag>
+                  <Button size="small" type="primary" onClick={() => commitAiCandidate("replace")}>
+                    {aiCandidate.sourceText ? t("Replace selection") : t("Insert here")}
+                  </Button>
+                  <Button size="small" onClick={() => commitAiCandidate("below")}>{t("Insert below")}</Button>
+                  <Button size="small" onClick={() => commitAiCandidate("cursor")}>{t("Insert at cursor")}</Button>
+                  <Button size="small" onClick={regenerateAiCandidate}>{t("Regenerate")}</Button>
+                  <Button size="small" danger onClick={discardAiCandidate}>{t("Discard")}</Button>
+                </>
+              ) : (
+                <>
+                  <span>{aiBusy ? (aiStatus || t("AI Writer is working…")) : selectedText ? t("AI actions for selection") : t("AI Writer is ready")}</span>
+                  {!aiBusy && selectedText && <Button size="small" onClick={() => void runAI("fix_grammar")}>{t("Fix Grammar")}</Button>}
+                  {!aiBusy && selectedText && <Button size="small" onClick={() => void runAI("professional")}>{t("Professional")}</Button>}
+                  {!aiBusy && selectedText && <Button size="small" onClick={() => void runAI("summarize")}>{t("Summarize")}</Button>}
+                  {!aiBusy && <Button size="small" type="primary" onClick={() => openAiWriter()}>{t("Open AI Writer")}</Button>}
+                  {aiBusy && <Button size="small" danger onClick={() => aiAbortRef.current?.abort()}>{t("Stop")}</Button>}
+                </>
+              )}
             </Space>
           )}
           {editor.isActive("table") && (
