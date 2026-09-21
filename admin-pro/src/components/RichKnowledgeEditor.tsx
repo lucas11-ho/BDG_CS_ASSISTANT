@@ -13,7 +13,7 @@ import { Table } from "@tiptap/extension-table";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableRow } from "@tiptap/extension-table-row";
-import { Button, ColorPicker, Divider, Dropdown, Input, Modal, Space, Tooltip, message } from "antd";
+import { Button, ColorPicker, Divider, Dropdown, Input, Modal, Select, Space, Tag, Tooltip, message } from "antd";
 import {
   AlignCenterOutlined,
   AlignLeftOutlined,
@@ -35,7 +35,7 @@ import {
   UndoOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
-import { streamEditorAI, type EditorAiAction } from "@/lib/api";
+import { streamEditorAI, type EditorAiAction, type EditorAiDocumentContext, type EditorAiResult } from "@/lib/api";
 import { createSmallBlurPreview, isPermanentHttpsUrl, mediaTargetFromUrl, normalizeUserUrl } from "@/lib/rich-editor-utils";
 import { useAdminI18n } from "@/i18n/runtime";
 
@@ -44,6 +44,17 @@ type Props = {
   onChange: (json: string, html: string) => void;
   uploadImage: (file: File) => Promise<string>;
   locale?: string;
+  aiContext?: EditorAiDocumentContext;
+};
+
+type AiCandidate = {
+  draftId: string;
+  action: EditorAiAction;
+  prompt: string;
+  sourceFrom: number;
+  sourceTo: number;
+  sourceText: string;
+  result: EditorAiResult;
 };
 
 type HoveredBlock = { pos: number; top: number; height: number } | null;
@@ -318,7 +329,7 @@ function blockTargetAtPoint(editor: any, clientX: number, clientY: number) {
   return { pos: clientY > rect.top + rect.height / 2 ? pos + node.nodeSize : pos };
 }
 
-export default function RichKnowledgeEditor({ value, onChange, uploadImage, locale = "en" }: Props) {
+export default function RichKnowledgeEditor({ value, onChange, uploadImage, locale = "en", aiContext }: Props) {
   const { t } = useAdminI18n();
   const [fullscreen, setFullscreen] = useState(false);
   const [pendingUploads, setPendingUploads] = useState(0);
@@ -334,6 +345,8 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
   const [mediaValue, setMediaValue] = useState("");
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
   const [aiPromptValue, setAiPromptValue] = useState("");
+  const [aiPromptAction, setAiPromptAction] = useState<EditorAiAction>("write");
+  const [aiCandidate, setAiCandidate] = useState<AiCandidate | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<any>(null);
