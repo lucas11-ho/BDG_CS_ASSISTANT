@@ -114,6 +114,7 @@ jobs:
           npm --prefix backend-api run test:v1252-youtube
           npm --prefix backend-api run test:v1253-public-media
           npm --prefix backend-api run test:v1254-domain-guide
+          npm --prefix backend-api run test:v1260-ai-writer
           npm --prefix backend-api run test:security
           npm --prefix backend-api run test:chat-reliability
           npm --prefix backend-api run test:structured
