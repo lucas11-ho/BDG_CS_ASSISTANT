@@ -1032,27 +1032,68 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
       </Modal>
 
       <Modal
-        title={t("Ask AI")}
+        title={<Space><RobotOutlined /><span>{t("AI Writer")}</span></Space>}
         open={aiPromptOpen}
+        width={720}
         onOk={() => {
           const prompt = aiPromptValue.trim();
-          if (!prompt) return message.info(t("Enter an instruction for AI"));
+          const option = aiActionOptions.find((item) => item.value === aiPromptAction);
+          if (option?.needsPrompt && !prompt) return message.info(t("Tell AI what you want it to write or change"));
           setAiPromptOpen(false);
-          setAiPromptValue("");
-          void runAI("ask", prompt);
+          void runAI(aiPromptAction, prompt);
         }}
         onCancel={() => setAiPromptOpen(false)}
-        okText={t("Generate")}
+        okText={t("Generate draft")}
         confirmLoading={aiBusy}
         destroyOnHidden
       >
-        <Input.TextArea
-          autoFocus
-          rows={5}
-          value={aiPromptValue}
-          onChange={(event) => setAiPromptValue(event.target.value)}
-          placeholder={t("Example: Turn this into a 3-column table, make the warning text red, and highlight the deadline in yellow.")}
-        />
+        <Space direction="vertical" size={12} style={{ width:"100%" }}>
+          <div>
+            <div style={{ marginBottom:6, fontWeight:600 }}>{t("What should AI do?")}</div>
+            <Select
+              value={aiPromptAction}
+              onChange={(value) => setAiPromptAction(value)}
+              options={aiActionOptions}
+              style={{ width:"100%" }}
+            />
+          </div>
+
+          <div>
+            <div style={{ marginBottom:6, fontWeight:600 }}>{t("Instruction")}</div>
+            <Input.TextArea
+              autoFocus
+              rows={7}
+              maxLength={10000}
+              showCount
+              value={aiPromptValue}
+              onChange={(event) => setAiPromptValue(event.target.value)}
+              placeholder={t("Tell AI exactly what to write, rewrite, format, translate, expand, summarize, or organize. Example: Write a complete professional withdrawal guide with an introduction, requirements, 5 numbered steps, a warning box, troubleshooting tips, and a 3-column table. Make warnings red and highlight important deadlines in yellow.")}
+            />
+          </div>
+
+          <div>
+            <div style={{ marginBottom:6, color:"#8ea0bd", fontSize:12 }}>{t("Quick instructions")}</div>
+            <Space wrap>
+              <Button size="small" onClick={() => { setAiPromptAction("write"); setAiPromptValue("Write a complete professional guide with a clear introduction, requirements, numbered steps, important warning, troubleshooting section, and a concise summary."); }}>{t("Complete guide")}</Button>
+              <Button size="small" onClick={() => { setAiPromptAction("table"); setAiPromptValue("Turn the selected information into a clear 3-column comparison table with concise headings."); }}>{t("Make a table")}</Button>
+              <Button size="small" onClick={() => { setAiPromptAction("ask"); setAiPromptValue("Rewrite this section professionally. Make the warning text red and highlight the most important sentence in yellow."); }}>{t("Format warnings")}</Button>
+              <Button size="small" onClick={() => { setAiPromptAction("translate"); setAiPromptValue("Translate the selected content into Simplified Chinese while preserving the formatting and meaning."); }}>{t("Translate")}</Button>
+            </Space>
+          </div>
+
+          <div style={{ padding:"10px 12px", border:"1px solid #243451", borderRadius:8, background:"#0d1727" }}>
+            <Space wrap>
+              <Tag color="blue">{locale.toUpperCase()}</Tag>
+              {selectedText && <Tag>{t("Selection")} · {selectedText.length} {t("characters")}</Tag>}
+              {aiContext?.title && <Tag>{t("Guide")} · {aiContext.title}</Tag>}
+              {aiContext?.topics?.slice(0, 3).map((topic) => <Tag key={topic}>{topic}</Tag>)}
+              {aiContext?.tags?.slice(0, 3).map((tag) => <Tag key={tag} color="purple">{tag}</Tag>)}
+            </Space>
+            <div style={{ marginTop:6, color:"#8ea0bd", fontSize:12 }}>
+              {t("AI Writer can create new content from scratch. Editing actions preserve supplied facts; writing actions can create structure and general explanatory content without inventing platform-specific policies or amounts.")}
+            </div>
+          </div>
+        </Space>
       </Modal>
     </div>
   );
