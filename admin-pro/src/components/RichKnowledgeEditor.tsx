@@ -543,7 +543,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
 
   const selection = editor.state.selection;
   const selectedText = selection.empty ? "" : editor.state.doc.textBetween(selection.from, selection.to, "\n").trim();
-  const showAiBar = aiReady || !!selectedText || aiBusy;
+  const showAiBar = aiReady || !!selectedText || aiBusy || !!aiCandidate;
 
   const openLinkModal = () => {
     const current = String(editor.getAttributes("link").href || "");
@@ -583,20 +583,37 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
     setMediaValue("");
   };
 
-  const runAI = async (action: EditorAiAction, customPrompt = "") => {
+  const openAiWriter = (action?: EditorAiAction) => {
     if (aiBusyRef.current) return;
+    if (aiCandidate) {
+      message.info(t("Keep or discard the current AI draft before starting another one"));
+      return;
+    }
+    setAiPromptAction(action || (selectedText ? "ask" : "write"));
+    setAiPromptOpen(true);
+  };
+
+  const runAI = async (action: EditorAiAction, customPrompt = "", allowCandidate = false) => {
+    if (aiBusyRef.current) return;
+    if (aiCandidate && !allowCandidate) {
+      message.info(t("Keep or discard the current AI draft before starting another one"));
+      return;
+    }
     const active = editorRef.current;
     if (!active) return;
 
     const activeSelection = active.state.selection;
     const original = activeSelection.empty ? "" : active.state.doc.textBetween(activeSelection.from, activeSelection.to, "\n");
-    if (!original && !["ask", "extend"].includes(action)) {
+    const selectionRequired = ["rewrite", "fix_grammar", "professional", "casual", "shorten", "summarize", "steps", "bullets", "table", "translate"].includes(action);
+    if (!original && selectionRequired) {
       message.info(t("Select text for this AI action"));
       return;
     }
 
-    let prompt = customPrompt.trim();
-    if (action === "ask" && !prompt) {
+    const prompt = customPrompt.trim();
+    const promptRequired = ["ask", "write", "write_section", "translate"].includes(action);
+    if (promptRequired && !prompt) {
+      setAiPromptAction(action);
       setAiPromptOpen(true);
       return;
     }
@@ -611,7 +628,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
 
     const previewPos = afterTopLevelBlock(active, activeSelection.to);
     const fullText = active.getText();
-    const context = fullText.slice(Math.max(0, activeSelection.from - 3500), Math.min(fullText.length, activeSelection.to + 3500));
+    const context = fullText.slice(Math.max(0, activeSelection.from - 6000), Math.min(fullText.length, activeSelection.to + 6000));
 
     const controller = new AbortController();
     aiAbortRef.current?.abort();
@@ -620,7 +637,8 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
     suppressPersistRef.current = true;
     setAiBusy(true);
     setAiReady(false);
-    setAiStatus(t("AI is preparing rich content"));
+    setAiStatus(t("AI Writer is preparing"));
+    setAiCandidate(null);
 
     active.chain().focus().insertContentAt(previewPos, {
       type:"aiDraft",
@@ -629,7 +647,8 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
 
     let draftText = "";
     let flushTimer: number | null = null;
-    const flushDraft = () => {
+    let candidateReady = false;
+    const flushDraft = (status = "streaming") => {
       if (flushTimer !== null) {
         window.clearTimeout(flushTimer);
         flushTimer = null;
@@ -640,17 +659,17 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
       current.view.dispatch(current.state.tr.setNodeMarkup(match.pos, undefined, {
         ...match.node.attrs,
         text:draftText,
-        status:"streaming",
+        status,
       }));
     };
     const queueDraftFlush = () => {
       if (flushTimer !== null) return;
-      flushTimer = window.setTimeout(flushDraft, 70);
+      flushTimer = window.setTimeout(() => flushDraft("streaming"), 70);
     };
 
     try {
       const result = await streamEditorAI(
-        { action, text:original, context, prompt, locale },
+        { action, text:original, context, prompt, locale, documentContext:aiContext },
         (token) => {
           if (!token || controller.signal.aborted) return;
           draftText += token;
@@ -660,37 +679,97 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
         (status) => setAiStatus(t(status)),
       );
 
-      flushDraft();
+      draftText = result.text || draftText;
+      flushDraft("ready");
       const current = editorRef.current;
       const match = findAiDraft(draftId);
       if (!current || !match) throw new Error("AI preview was interrupted");
 
-      current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
-      aiBusyRef.current = false;
-      suppressPersistRef.current = pendingUploadsRef.current > 0;
+      candidateReady = true;
+      setAiCandidate({
+        draftId,
+        action,
+        prompt,
+        sourceFrom:replaceFrom,
+        sourceTo:replaceTo,
+        sourceText:original,
+        result,
+      });
 
-      const richContent = Array.isArray(result.document?.content) && result.document.content.length
-        ? result.document.content
-        : [{ type:"paragraph", content:result.text ? [{ type:"text", text:result.text }] : [] }];
-
-      current.chain().focus().insertContentAt({ from:replaceFrom, to:replaceTo }, richContent).run();
-      persistEditor(current);
-      if (result.degraded) message.warning(t("AI completed with plain-text fallback formatting"));
-      else message.success(t("AI rich content inserted"));
+      if (result.degraded) {
+        message.warning(t("AI Writer completed, but some advanced formatting was simplified"));
+      } else if (result.repaired) {
+        message.success(t("AI Writer completed and repaired the rich formatting automatically"));
+      } else {
+        message.success(t("AI Writer draft is ready"));
+      }
     } catch (error: any) {
       if (flushTimer !== null) window.clearTimeout(flushTimer);
       const current = editorRef.current;
       const match = findAiDraft(draftId);
       if (current && match) current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
-      if (error?.name !== "AbortError") message.error(error?.message || t("AI writing failed"));
+      if (error?.name !== "AbortError") message.error(error?.message || t("AI Writer failed"));
     } finally {
       aiBusyRef.current = false;
-      suppressPersistRef.current = pendingUploadsRef.current > 0;
+      suppressPersistRef.current = candidateReady || pendingUploadsRef.current > 0;
       setAiBusy(false);
       setAiStatus("");
       aiAbortRef.current = null;
       if (!suppressPersistRef.current) persistEditor(editorRef.current);
     }
+  };
+
+  const discardAiCandidate = () => {
+    const current = editorRef.current;
+    if (!current || !aiCandidate) return;
+    const match = findAiDraft(aiCandidate.draftId);
+    if (match) current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
+    setAiCandidate(null);
+    suppressPersistRef.current = pendingUploadsRef.current > 0;
+    if (!suppressPersistRef.current) persistEditor(current);
+  };
+
+  const commitAiCandidate = (mode: "replace" | "below" | "cursor") => {
+    const current = editorRef.current;
+    if (!current || !aiCandidate) return;
+    const match = findAiDraft(aiCandidate.draftId);
+    if (!match) {
+      message.error(t("AI draft could not be found"));
+      setAiCandidate(null);
+      suppressPersistRef.current = pendingUploadsRef.current > 0;
+      return;
+    }
+
+    const richContent = Array.isArray(aiCandidate.result.document?.content) && aiCandidate.result.document.content.length
+      ? aiCandidate.result.document.content
+      : [{ type:"paragraph", content:aiCandidate.result.text ? [{ type:"text", text:aiCandidate.result.text }] : [] }];
+
+    const draftPos = match.pos;
+    current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
+
+    if (mode === "replace") {
+      current.chain().focus().insertContentAt({ from:aiCandidate.sourceFrom, to:aiCandidate.sourceTo }, richContent).run();
+    } else if (mode === "cursor") {
+      current.chain().focus().insertContentAt(aiCandidate.sourceFrom, richContent).run();
+    } else {
+      current.chain().focus().insertContentAt(draftPos, richContent).run();
+    }
+
+    setAiCandidate(null);
+    suppressPersistRef.current = pendingUploadsRef.current > 0;
+    if (!suppressPersistRef.current) persistEditor(current);
+    message.success(t("AI Writer content inserted"));
+  };
+
+  const regenerateAiCandidate = () => {
+    const current = editorRef.current;
+    const candidate = aiCandidate;
+    if (!current || !candidate) return;
+    const match = findAiDraft(candidate.draftId);
+    if (match) current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
+    setAiCandidate(null);
+    current.commands.setTextSelection({ from:candidate.sourceFrom, to:candidate.sourceTo });
+    window.setTimeout(() => void runAI(candidate.action, candidate.prompt, true), 0);
   };
 
   const tool = (title: string, icon: React.ReactNode, action: () => void, active = false, danger = false) => (
