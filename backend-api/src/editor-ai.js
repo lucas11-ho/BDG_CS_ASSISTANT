@@ -40,12 +40,22 @@ function bounded(value, max) {
 }
 
 function instructionFor(action, prompt) {
-  if (action === 'fix_grammar') return 'Correct grammar, spelling, punctuation, and clarity. Preserve meaning and factual claims. Keep useful formatting where appropriate.';
-  if (action === 'professional') return 'Rewrite in a concise, professional customer-service tone. Preserve meaning and factual claims. Use clear visual formatting when it improves readability.';
-  if (action === 'casual') return 'Rewrite in a natural, friendly, casual tone. Preserve meaning and factual claims.';
-  if (action === 'summarize') return 'Summarize the supplied text without adding new facts. Use headings, bullets, or a small table only when they genuinely improve comprehension.';
-  if (action === 'extend') return 'Continue the writing naturally using only information already present in the supplied text and context. Do not invent operational facts.';
-  return bounded(prompt, 2400) || 'Improve the supplied writing while preserving its meaning and factual claims.';
+  const custom = bounded(prompt, 10000);
+  if (action === 'write') return custom || 'Write polished, complete content from scratch for the requested purpose.';
+  if (action === 'write_section') return custom || 'Write a polished section that fits naturally into the current document.';
+  if (action === 'rewrite') return custom || 'Rewrite the selected content for clarity and quality while preserving its factual meaning.';
+  if (action === 'fix_grammar') return 'Correct grammar, spelling, punctuation, wording, and clarity. Preserve factual meaning.';
+  if (action === 'professional') return 'Rewrite in a concise, professional customer-service tone. Preserve factual meaning.';
+  if (action === 'casual') return 'Rewrite in a natural, friendly, easy-to-read tone. Preserve factual meaning.';
+  if (action === 'shorten') return 'Make the selected content shorter and clearer without losing important facts.';
+  if (action === 'expand') return custom || 'Expand the content with helpful explanation, structure, and examples that do not invent platform-specific facts.';
+  if (action === 'summarize') return 'Summarize the supplied content clearly without adding new factual claims.';
+  if (action === 'steps') return 'Turn the supplied content into clear numbered steps. Preserve all important factual details.';
+  if (action === 'bullets') return 'Turn the supplied content into concise, well-organized bullet points. Preserve factual details.';
+  if (action === 'table') return custom || 'Turn the supplied content into a useful table with clear column headings. Preserve factual details.';
+  if (action === 'translate') return custom || 'Translate the supplied content into the requested language while preserving meaning and structure.';
+  if (action === 'extend') return custom || 'Continue writing naturally from the current document context.';
+  return custom || 'Follow the user instruction and produce polished content suitable for the current document.';
 }
 
 function sseEvent(event, data) {
