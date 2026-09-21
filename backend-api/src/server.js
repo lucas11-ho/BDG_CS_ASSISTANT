@@ -38,6 +38,9 @@ import {
 const env = getRuntimeEnv();
 const API_VERSION = '1.24.0-content-taxonomy-stable-faq-slugs';
 const API_FEATURES = [
+  'ai-writer-v126',
+  'ai-writer-rich-repair',
+  'ai-writer-draft-review',
   'alive-rich-editor',
   'persistent-editor-media',
   'editor-ai-sse',

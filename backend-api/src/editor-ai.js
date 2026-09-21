@@ -1,11 +1,22 @@
 const ACTIONS = new Set([
   'ask',
+  'write',
+  'write_section',
+  'rewrite',
   'fix_grammar',
   'professional',
   'casual',
+  'shorten',
+  'expand',
   'summarize',
+  'steps',
+  'bullets',
+  'table',
+  'translate',
   'extend',
 ]);
+
+const CREATIVE_ACTIONS = new Set(['ask', 'write', 'write_section', 'expand', 'extend']);
 
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
 const INLINE_MARKS = new Set(['bold', 'italic', 'underline', 'strike', 'textStyle', 'highlight']);
@@ -28,13 +39,70 @@ function bounded(value, max) {
   return String(value || '').trim().slice(0, max);
 }
 
+function safeContext(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out = {};
+  for (const key of ['documentType', 'title', 'summary', 'platformName', 'languageLabel']) {
+    const text = bounded(value[key], key === 'summary' ? 3000 : 600);
+    if (text) out[key] = text;
+  }
+  for (const key of ['topics', 'tags']) {
+    if (Array.isArray(value[key])) out[key] = value[key].map((item) => bounded(item, 180)).filter(Boolean).slice(0, 30);
+  }
+  return out;
+}
+
+function contextText(context) {
+  const parts = [];
+  if (context.documentType) parts.push('Document type: ' + context.documentType);
+  if (context.title) parts.push('Title: ' + context.title);
+  if (context.summary) parts.push('Summary: ' + context.summary);
+  if (context.platformName) parts.push('Platform/brand: ' + context.platformName);
+  if (context.languageLabel) parts.push('Language: ' + context.languageLabel);
+  if (context.topics?.length) parts.push('Topics: ' + context.topics.join(', '));
+  if (context.tags?.length) parts.push('Tags: ' + context.tags.join(', '));
+  return parts.join('\n');
+}
+
+function tokenBudget(action, prompt, selectedText) {
+  const longForm = /\b(complete|full|detailed|comprehensive|article|guide|tutorial|documentation|long|in-depth|multiple sections|10 sections|ten sections)\b/i.test(prompt);
+  if (longForm) return 7000;
+  if (['write', 'ask', 'write_section', 'expand', 'extend'].includes(action)) return selectedText.length > 7000 ? 5500 : 4800;
+  return 2600;
+}
+
+function writerSystem(action, locale) {
+  const creative = CREATIVE_ACTIONS.has(action);
+  return [
+    'You are the AI Writer inside a professional rich-document editor.',
+    creative
+      ? 'This is a creative writing task. Follow the user instruction and write original, complete, useful content. You may create structure, explanations, examples, headings, lists, comparisons, and tables when helpful.'
+      : 'This is a transformation task. Preserve the supplied factual meaning and do not introduce unrelated claims.',
+    'Do not fabricate platform-specific policies, payment rules, bonus amounts, URLs, eligibility requirements, guarantees, or operational facts that were not supplied by the user or document context.',
+    'If exact platform-specific facts are missing, write around them without inventing them.',
+    'Use clear Markdown-style structure for headings, lists, quotes, and tables when useful. Do not output JSON.',
+    'Do not explain your process. Return only the content requested by the user.',
+    'Write in locale: ' + locale + '.',
+  ].join('\n');
+}
+
 function instructionFor(action, prompt) {
-  if (action === 'fix_grammar') return 'Correct grammar, spelling, punctuation, and clarity. Preserve meaning and factual claims. Keep useful formatting where appropriate.';
-  if (action === 'professional') return 'Rewrite in a concise, professional customer-service tone. Preserve meaning and factual claims. Use clear visual formatting when it improves readability.';
-  if (action === 'casual') return 'Rewrite in a natural, friendly, casual tone. Preserve meaning and factual claims.';
-  if (action === 'summarize') return 'Summarize the supplied text without adding new facts. Use headings, bullets, or a small table only when they genuinely improve comprehension.';
-  if (action === 'extend') return 'Continue the writing naturally using only information already present in the supplied text and context. Do not invent operational facts.';
-  return bounded(prompt, 2400) || 'Improve the supplied writing while preserving its meaning and factual claims.';
+  const custom = bounded(prompt, 10000);
+  if (action === 'write') return custom || 'Write polished, complete content from scratch for the requested purpose.';
+  if (action === 'write_section') return custom || 'Write a polished section that fits naturally into the current document.';
+  if (action === 'rewrite') return custom || 'Rewrite the selected content for clarity and quality while preserving its factual meaning.';
+  if (action === 'fix_grammar') return 'Correct grammar, spelling, punctuation, wording, and clarity. Preserve factual meaning.';
+  if (action === 'professional') return 'Rewrite in a concise, professional customer-service tone. Preserve factual meaning.';
+  if (action === 'casual') return 'Rewrite in a natural, friendly, easy-to-read tone. Preserve factual meaning.';
+  if (action === 'shorten') return 'Make the selected content shorter and clearer without losing important facts.';
+  if (action === 'expand') return custom || 'Expand the content with helpful explanation, structure, and examples that do not invent platform-specific facts.';
+  if (action === 'summarize') return 'Summarize the supplied content clearly without adding new factual claims.';
+  if (action === 'steps') return 'Turn the supplied content into clear numbered steps. Preserve all important factual details.';
+  if (action === 'bullets') return 'Turn the supplied content into concise, well-organized bullet points. Preserve factual details.';
+  if (action === 'table') return custom || 'Turn the supplied content into a useful table with clear column headings. Preserve factual details.';
+  if (action === 'translate') return custom || 'Translate the supplied content into the requested language while preserving meaning and structure.';
+  if (action === 'extend') return custom || 'Continue writing naturally from the current document context.';
+  return custom || 'Follow the user instruction and produce polished content suitable for the current document.';
 }
 
 function sseEvent(event, data) {
@@ -175,51 +243,240 @@ function normalizeBlock(node, depth = 0) {
   return null;
 }
 
-function plainParagraph(text) {
-  const value = String(text || '').trim().slice(0, 30000);
+function inlineFromText(text) {
+  const value = String(text || '').trim();
+  return value ? [{ type:'text', text:value.slice(0, 30000) }] : undefined;
+}
+
+function paragraph(text) {
+  const content = inlineFromText(text);
+  return { type:'paragraph', ...(content ? { content } : {}) };
+}
+
+function listItem(text) {
+  return { type:'listItem', content:[paragraph(text)] };
+}
+
+function normalizeRichDocument(value) {
+  const source = value?.type === 'doc' ? value : { type:'doc', content:Array.isArray(value?.content) ? value.content : [] };
+  const content = Array.isArray(source.content)
+    ? source.content.map((item) => normalizeBlock(item, 0)).filter(Boolean).slice(0, 180)
+    : [];
+  if (!content.length) throw new Error('Structured output did not contain usable editor blocks');
+  return { type:'doc', content };
+}
+
+function markdownFallback(source) {
+  const lines = String(source || '').replace(/\r/g, '').split('\n');
+  const content = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) { index += 1; continue; }
+
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      content.push({ type:'heading', attrs:{ level:heading[1].length }, content:inlineFromText(heading[2]) });
+      index += 1;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+        items.push(listItem(lines[index].trim().replace(/^[-*]\s+/, '')));
+        index += 1;
+      }
+      content.push({ type:'bulletList', content:items });
+      continue;
+    }
+
+    if (/^\d+[.)]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\d+[.)]\s+/.test(lines[index].trim())) {
+        items.push(listItem(lines[index].trim().replace(/^\d+[.)]\s+/, '')));
+        index += 1;
+      }
+      content.push({ type:'orderedList', attrs:{ start:1 }, content:items });
+      continue;
+    }
+
+    if (line.startsWith('> ')) {
+      const quote = [];
+      while (index < lines.length && lines[index].trim().startsWith('> ')) {
+        quote.push(lines[index].trim().slice(2));
+        index += 1;
+      }
+      content.push({ type:'blockquote', content:[paragraph(quote.join(' '))] });
+      continue;
+    }
+
+    const parseCells = (value) => value.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim());
+    const next = index + 1 < lines.length ? lines[index + 1].trim() : '';
+    if (line.includes('|') && /^\|?\s*:?-{3,}/.test(next) && next.includes('|')) {
+      const header = parseCells(line);
+      index += 2;
+      const rows = [{
+        type:'tableRow',
+        content:header.map((cell) => ({ type:'tableHeader', attrs:{ colspan:1, rowspan:1, colwidth:null }, content:[paragraph(cell)] })),
+      }];
+      while (index < lines.length && lines[index].trim() && lines[index].includes('|')) {
+        const cells = parseCells(lines[index]);
+        rows.push({
+          type:'tableRow',
+          content:header.map((_, cellIndex) => ({ type:'tableCell', attrs:{ colspan:1, rowspan:1, colwidth:null }, content:[paragraph(cells[cellIndex] || '')] })),
+        });
+        index += 1;
+      }
+      content.push({ type:'table', content:rows });
+      continue;
+    }
+
+    const paragraphLines = [line];
+    index += 1;
+    while (
+      index < lines.length
+      && lines[index].trim()
+      && !/^(#{1,4})\s+/.test(lines[index].trim())
+      && !/^[-*]\s+/.test(lines[index].trim())
+      && !/^\d+[.)]\s+/.test(lines[index].trim())
+      && !lines[index].trim().startsWith('> ')
+    ) {
+      paragraphLines.push(lines[index].trim());
+      index += 1;
+    }
+    content.push(paragraph(paragraphLines.join(' ')));
+  }
+  return { type:'doc', content:content.length ? content.slice(0, 180) : [paragraph(source)] };
+}
+
+function extractJson(text) {
+  let value = String(text || '').trim();
+  value = value.replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/i, '').trim();
+  const first = value.indexOf('{');
+  const last = value.lastIndexOf('}');
+  if (first >= 0 && last > first) value = value.slice(first, last + 1);
+  return JSON.parse(value);
+}
+
+function formatterSystem(locale) {
+  return [
+    'Convert the supplied finished writing into a TipTap/ProseMirror JSON document.',
+    'Return only one JSON object. No markdown fences, commentary, or XML.',
+    'Root must be {"type":"doc","content":[...]}.',
+    'Allowed block nodes: paragraph, heading, blockquote, bulletList, orderedList, listItem, table, tableRow, tableCell, tableHeader, horizontalRule, codeBlock.',
+    'Allowed inline nodes: text, hardBreak.',
+    'Allowed marks: bold, italic, underline, strike, textStyle, highlight.',
+    'textStyle may contain attrs.color using a 6-digit hexadecimal color.',
+    'highlight may contain attrs.color using a 6-digit hexadecimal color.',
+    'Tables must be table > tableRow > tableHeader/tableCell > block content.',
+    'Preserve all content and follow the user formatting instruction, including requested tables, headings, colors, highlights, lists, quotes, and emphasis.',
+    'Do not create images, iframes, links, scripts, HTML, or unknown nodes.',
+    'Write in locale: ' + locale + '.',
+  ].join('\n');
+}
+
+async function providerJson(env, messages, maxTokens, signal) {
+  const apiBase = String(env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\/$/, '');
+  const response = await fetch(apiBase + '/chat/completions', {
+    method:'POST',
+    signal,
+    headers:{ Authorization:'Bearer ' + env.DEEPSEEK_API_KEY, 'Content-Type':'application/json' },
+    body:JSON.stringify({
+      model:env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
+      messages,
+      temperature:0.05,
+      max_tokens:maxTokens,
+      stream:false,
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    const error = new Error('AI provider returned HTTP ' + response.status);
+    error.status = response.status;
+    error.detail = detail.slice(0, 240);
+    throw error;
+  }
+  const payload = await response.json();
+  return String(payload?.choices?.[0]?.message?.content || '');
+}
+
+async function formatRichDocument(env, generatedText, prompt, locale, signal, onStatus) {
+  const user = [
+    'Original user instruction:',
+    bounded(prompt, 10000) || '(No additional formatting instruction)',
+    '',
+    'Finished writing to format:',
+    bounded(generatedText, 50000),
+  ].join('\n');
+
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0) onStatus('AI is repairing rich formatting');
+    try {
+      const raw = await providerJson(
+        env,
+        [
+          { role:'system', content:formatterSystem(locale) + (attempt ? '\nIMPORTANT: The previous structured response was invalid. Return strict valid JSON only.' : '') },
+          { role:'user', content:user },
+        ],
+        Math.min(7500, Math.max(3500, Math.ceil(generatedText.length / 2.2))),
+        signal,
+      );
+      return { document:normalizeRichDocument(extractJson(raw)), repaired:attempt > 0, degraded:false };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
   return {
-    type:'doc',
-    content:[{
-      type:'paragraph',
-      ...(value ? { content:[{ type:'text', text:value }] } : {}),
-    }],
+    document:markdownFallback(generatedText),
+    repaired:false,
+    degraded:true,
+    formatError:lastError?.message || 'Structured formatting failed',
   };
 }
 
-function normalizeRichDocument(value, fallbackText = '') {
-  const source = value?.type === 'doc' ? value : { type:'doc', content:Array.isArray(value?.content) ? value.content : [] };
-  const content = Array.isArray(source.content)
-    ? source.content.map((item) => normalizeBlock(item, 0)).filter(Boolean).slice(0, 120)
-    : [];
-  return content.length ? { type:'doc', content } : plainParagraph(fallbackText);
-}
-
-function richPrompt(locale) {
-  return [
-    'Return exactly two sections and nothing else:',
-    '<draft>',
-    'A readable plain-text preview of the result. Do not include XML tags inside the draft.',
-    '</draft>',
-    '<rich>',
-    'A single JSON object compatible with the TipTap/ProseMirror schema described below.',
-    '</rich>',
-    '',
-    'The <rich> JSON must be: {"type":"doc","content":[...]}',
-    'Allowed block node types: paragraph, heading, blockquote, bulletList, orderedList, listItem, table, tableRow, tableCell, tableHeader, horizontalRule, codeBlock.',
-    'Allowed inline nodes: text, hardBreak.',
-    'Allowed text marks: bold, italic, underline, strike, textStyle with attrs.color, highlight with attrs.color.',
-    'Use 6-digit hexadecimal colors such as #1d4ed8 and #fff59d.',
-    'Tables must use table > tableRow > tableHeader/tableCell > paragraph (or another allowed block).',
-    'You may create tables, headings, lists, quotes, colored text, highlighted text, and combinations when requested.',
-    'Do not output images, iframes, scripts, raw HTML, links, or unknown node/mark types.',
-    'Do not use markdown fences around the JSON.',
-    `Write in locale: ${locale}.`,
-  ].join('\n');
+async function openWriterStream(env, messages, maxTokens, signal) {
+  const apiBase = String(env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\/$/, '');
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(apiBase + '/chat/completions', {
+        method:'POST',
+        signal,
+        headers:{
+          Authorization:'Bearer ' + env.DEEPSEEK_API_KEY,
+          'Content-Type':'application/json',
+          Accept:'text/event-stream',
+        },
+        body:JSON.stringify({
+          model:env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
+          messages,
+          temperature:0.35,
+          max_tokens:maxTokens,
+          stream:true,
+        }),
+      });
+      if (response.ok && response.body) return response;
+      const detail = await response.text().catch(() => '');
+      const error = new Error('AI provider returned HTTP ' + response.status);
+      error.status = response.status;
+      error.detail = detail.slice(0, 240);
+      lastError = error;
+      if (![408, 409, 425, 429, 500, 502, 503, 504].includes(response.status)) break;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+  }
+  throw lastError || new Error('AI provider request failed');
 }
 
 export async function streamEditorAi(request, env) {
   if (String(env.AI_MODE_ENABLED).toLowerCase() === 'false' || !env.DEEPSEEK_API_KEY) {
-    return new Response(JSON.stringify({ ok:false, error:'AI writing assistant is not configured', code:'EDITOR_AI_UNAVAILABLE' }), {
+    return new Response(JSON.stringify({ ok:false, error:'AI Writer is not configured', code:'EDITOR_AI_UNAVAILABLE' }), {
       status:503,
       headers:{ 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store' },
     });
@@ -235,31 +492,27 @@ export async function streamEditorAi(request, env) {
   }
 
   const action = ACTIONS.has(String(payload.action || '')) ? String(payload.action) : 'ask';
-  const selectedText = bounded(payload.text, 12000);
-  const surroundingText = bounded(payload.context, 7000);
+  const selectedText = bounded(payload.text, 16000);
+  const surroundingText = bounded(payload.context, 12000);
+  const prompt = bounded(payload.prompt, 10000);
   const locale = bounded(payload.locale, 40) || 'en';
-  if (!selectedText && action !== 'ask' && action !== 'extend') {
-    return new Response(JSON.stringify({ ok:false, error:'Select text before using this AI action', code:'EDITOR_AI_TEXT_REQUIRED' }), {
+  const documentContext = safeContext(payload.documentContext);
+
+  if (!selectedText && ['rewrite', 'fix_grammar', 'professional', 'casual', 'shorten', 'summarize', 'steps', 'bullets', 'table', 'translate'].includes(action)) {
+    return new Response(JSON.stringify({ ok:false, error:'Select text before using this AI edit action', code:'EDITOR_AI_TEXT_REQUIRED' }), {
       status:400,
       headers:{ 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store' },
     });
   }
 
-  const system = [
-    'You are the native AI writing and formatting assistant inside the BDG Rich Editor.',
-    'Never invent account, payment, bonus, policy, security, or operational facts.',
-    'Use only facts present in the selected text or nearby document context.',
-    'Follow the requested transformation and formatting precisely.',
-    richPrompt(locale),
-  ].join('\n\n');
-
+  const context = contextText(documentContext);
   const user = [
-    `Task: ${instructionFor(action, payload.prompt)}`,
-    selectedText ? `Selected text:\n${selectedText}` : '',
-    surroundingText ? `Nearby document context:\n${surroundingText}` : '',
-  ].filter(Boolean).join('\n\n');
+    'Task: ' + instructionFor(action, prompt),
+    context ? '\nDocument context:\n' + context : '',
+    selectedText ? '\nSelected text:\n' + selectedText : '',
+    surroundingText ? '\nNearby document text:\n' + surroundingText : '',
+  ].filter(Boolean).join('\n');
 
-  const apiBase = String(env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\/$/, '');
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const controller = new AbortController();
@@ -268,7 +521,6 @@ export async function streamEditorAi(request, env) {
 
   const body = new ReadableStream({
     async start(output) {
-      let provider;
       let reader;
       let heartbeat;
       let inactivity;
@@ -283,52 +535,38 @@ export async function streamEditorAi(request, env) {
         if (closed) return;
         try { output.enqueue(encoder.encode(value)); } catch { closed = true; }
       };
-      const inactivityMs = Math.max(30000, Math.min(Number(env.DEEPSEEK_TIMEOUT_MS || 15000) * 3, 60000));
       const resetInactivity = () => {
         clearTimeout(inactivity);
-        inactivity = setTimeout(() => controller.abort(), inactivityMs);
+        inactivity = setTimeout(() => controller.abort(), 75000);
       };
+      const onStatus = (message) => send(sseEvent('status', { message }));
 
       try {
-        send(sseEvent('start', { action, mode:'rich' }));
-        send(sseEvent('status', { message:'AI is preparing rich content' }));
+        const budget = tokenBudget(action, prompt, selectedText);
+        send(sseEvent('start', {
+          action,
+          mode:CREATIVE_ACTIONS.has(action) ? 'writer' : 'editor',
+          token_budget:budget,
+        }));
+        onStatus(CREATIVE_ACTIONS.has(action) ? 'AI Writer is composing' : 'AI is editing your content');
         heartbeat = setInterval(() => send(sseComment()), 8000);
-        totalTimer = setTimeout(() => controller.abort(), 120000);
+        totalTimer = setTimeout(() => controller.abort(), 180000);
         resetInactivity();
 
-        provider = await fetch(`${apiBase}/chat/completions`, {
-          method:'POST',
-          signal:controller.signal,
-          headers:{
-            Authorization:`Bearer ${env.DEEPSEEK_API_KEY}`,
-            'Content-Type':'application/json',
-            Accept:'text/event-stream',
-          },
-          body:JSON.stringify({
-            model:env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
-            messages:[{ role:'system', content:system }, { role:'user', content:user }],
-            temperature:action === 'casual' ? 0.4 : 0.18,
-            max_tokens:2600,
-            stream:true,
-          }),
-        });
+        const provider = await openWriterStream(
+          env,
+          [
+            { role:'system', content:writerSystem(action, locale) },
+            { role:'user', content:user },
+          ],
+          budget,
+          controller.signal,
+        );
         resetInactivity();
-
-        if (!provider.ok || !provider.body) {
-          const detail = await provider.text().catch(() => '');
-          send(sseEvent('error', {
-            error:`AI provider returned HTTP ${provider.status}`,
-            detail:detail.slice(0,220),
-            code:'EDITOR_AI_PROVIDER_ERROR',
-          }));
-          return;
-        }
-
         reader = provider.body.getReader();
-        let providerBuffer = '';
-        let rawOutput = '';
-        let emittedDraftLength = 0;
 
+        let providerBuffer = '';
+        let generatedText = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -346,44 +584,38 @@ export async function streamEditorAi(request, env) {
               const parsed = JSON.parse(data);
               const delta = String(parsed?.choices?.[0]?.delta?.content || '');
               if (!delta) continue;
-              rawOutput += delta;
-              const draft = sectionText(rawOutput, 'draft', true);
-              if (draft.length > emittedDraftLength) {
-                const text = draft.slice(emittedDraftLength);
-                emittedDraftLength = draft.length;
-                send(sseEvent('token', { text }));
-              }
-            } catch {
-              // Ignore malformed provider frames and continue consuming the stream.
-            }
+              generatedText += delta;
+              send(sseEvent('token', { text:delta }));
+            } catch {}
           }
         }
 
-        const finalDraft = sectionText(rawOutput, 'draft', false).trim() || bounded(rawOutput, 30000);
-        const richText = sectionText(rawOutput, 'rich', false).trim();
-        let document;
-        let degraded = false;
-        try {
-          document = normalizeRichDocument(JSON.parse(richText), finalDraft);
-        } catch {
-          document = plainParagraph(finalDraft);
-          degraded = true;
-        }
+        generatedText = generatedText.trim();
+        if (!generatedText) throw new Error('AI Writer finished without returning content');
 
-        if (emittedDraftLength === 0 && finalDraft) {
-          send(sseEvent('token', { text:finalDraft }));
-        }
+        onStatus('AI is formatting rich content');
+        resetInactivity();
+        const rich = await formatRichDocument(env, generatedText, prompt, locale, controller.signal, onStatus);
+        resetInactivity();
+
         send(sseEvent('result', {
-          text:finalDraft,
-          document,
-          degraded,
+          text:generatedText,
+          document:rich.document,
+          degraded:rich.degraded === true,
+          repaired:rich.repaired === true,
+          format_error:rich.formatError || '',
+          action,
         }));
-        send(sseEvent('done', { ok:true, degraded }));
+        send(sseEvent('done', {
+          ok:true,
+          degraded:rich.degraded === true,
+          repaired:rich.repaired === true,
+        }));
       } catch (error) {
         if (!request.signal?.aborted) {
           const timedOut = error?.name === 'AbortError';
           send(sseEvent('error', {
-            error:timedOut ? 'AI generation timed out or became inactive. Please try again.' : (error?.message || 'AI stream failed'),
+            error:timedOut ? 'AI Writer timed out or became inactive. Please try again.' : (error?.message || 'AI Writer failed'),
             code:timedOut ? 'EDITOR_AI_TIMEOUT' : 'EDITOR_AI_STREAM_FAILED',
           }));
         }

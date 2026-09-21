@@ -564,7 +564,24 @@ function VisualGuideStudio() {
           <Col xs={24} md={12}><Form.Item name="title" label={`${localeName(activeLocaleMeta)} title`} rules={[{ required: true }]}><Input onChange={(event) => updateActiveDocument({ title: event.target.value })} /></Form.Item></Col>
           <Col xs={24} md={12}><Form.Item name="summary" label="Summary"><Input onChange={(event) => updateActiveDocument({ summary: event.target.value })} /></Form.Item></Col>
         </Row>
-        <RichKnowledgeEditor value={editorJson} onChange={(json, html) => { setEditorJson(json); setEditorHtml(html); updateActiveDocument({ rich_json: json, rich_html: html, body: plainText(html) }); }} uploadImage={uploadImage} />
+        <RichKnowledgeEditor
+          value={editorJson}
+          locale={activeLocale || defaultLocale}
+          aiContext={{
+            documentType: "guide",
+            title: activeDocument.title || "",
+            summary: activeDocument.summary || "",
+            languageLabel: localeName(activeLocaleMeta),
+            topics: categories
+              .filter((category) => (form.getFieldValue("topic_ids") || []).map(Number).includes(Number(category.id)))
+              .map((category) => category.name),
+            tags: tags
+              .filter((tag) => (form.getFieldValue("tag_ids") || []).map(Number).includes(Number(tag.id)))
+              .map((tag) => tag.name),
+          }}
+          onChange={(json, html) => { setEditorJson(json); setEditorHtml(html); updateActiveDocument({ rich_json: json, rich_html: html, body: plainText(html) }); }}
+          uploadImage={uploadImage}
+        />
         <Row gutter={12} style={{ marginTop: 14 }}>
           <Col xs={24} md={12}><Form.Item name="keywords" label="Search keywords"><Input placeholder="deposit, pending, recharge" onChange={(event) => updateActiveDocument({ keywords: event.target.value })} /></Form.Item></Col>
         </Row>

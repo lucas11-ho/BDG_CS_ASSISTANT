@@ -17,13 +17,13 @@ const ci = read('.github', 'workflows', 'ci.yml');
 const production = read('.github', 'workflows', 'bdg-production-release.yml');
 
 const checks = [
-  ['AI no longer uses a single fixed lifetime timeout', editorAi.includes('resetInactivity') && editorAi.includes('inactivityMs') && editorAi.includes('setInterval(() => send(sseComment())')],
+  ['AI no longer uses the old short fixed lifetime cutoff', editorAi.includes('resetInactivity') && editorAi.includes('75000') && editorAi.includes('setInterval(() => send(sseComment())')],
   ['AI provider stream returns validated rich document', editorAi.includes('normalizeRichDocument') && editorAi.includes("sseEvent('result'")],
   ['AI supports rich table nodes', editorAi.includes("'table'") && editorAi.includes("'tableRow'") && editorAi.includes("'tableCell'") && editorAi.includes("'tableHeader'")],
   ['AI supports text color and highlight marks', editorAi.includes("'textStyle'") && editorAi.includes("'highlight'") && editorAi.includes('COLOR_RE')],
-  ['AI prompt explicitly permits tables and visual formatting', editorAi.includes('You may create tables, headings, lists, quotes, colored text, highlighted text')],
+  ['AI formatter explicitly preserves tables and visual formatting', editorAi.includes('including requested tables, headings, colors, highlights')],
   ['Admin AI client consumes structured result event', api.includes("event === 'result'") && api.includes('document:parsed.document')],
-  ['AI preview is transient and throttled', editor.includes('AiDraft') && editor.includes('queueDraftFlush') && editor.includes('window.setTimeout(flushDraft, 70)')],
+  ['AI preview is transient and throttled', editor.includes('AiDraft') && editor.includes('queueDraftFlush') && editor.includes('window.setTimeout(() => flushDraft("streaming"), 70)')],
   ['AI no longer mutates original selection token by token', !editor.includes('current.state.tr.insertText(token, insertPos)')],
   ['Upload path suppresses document serialization while active', editor.includes('pendingUploadsRef.current > 0') && editor.includes('suppressPersistRef.current = true')],
   ['Upload preview no longer reads full image as base64', !editor.includes('readAsDataURL') && editor.includes('createSmallBlurPreview')],

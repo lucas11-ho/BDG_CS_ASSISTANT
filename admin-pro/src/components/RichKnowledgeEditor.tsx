@@ -13,7 +13,7 @@ import { Table } from "@tiptap/extension-table";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableRow } from "@tiptap/extension-table-row";
-import { Button, ColorPicker, Divider, Dropdown, Input, Modal, Space, Tooltip, message } from "antd";
+import { Button, ColorPicker, Divider, Dropdown, Input, Modal, Select, Space, Tag, Tooltip, message } from "antd";
 import {
   AlignCenterOutlined,
   AlignLeftOutlined,
@@ -35,7 +35,7 @@ import {
   UndoOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
-import { streamEditorAI, type EditorAiAction } from "@/lib/api";
+import { streamEditorAI, type EditorAiAction, type EditorAiDocumentContext, type EditorAiResult } from "@/lib/api";
 import { createSmallBlurPreview, isPermanentHttpsUrl, mediaTargetFromUrl, normalizeUserUrl } from "@/lib/rich-editor-utils";
 import { useAdminI18n } from "@/i18n/runtime";
 
@@ -44,6 +44,17 @@ type Props = {
   onChange: (json: string, html: string) => void;
   uploadImage: (file: File) => Promise<string>;
   locale?: string;
+  aiContext?: EditorAiDocumentContext;
+};
+
+type AiCandidate = {
+  draftId: string;
+  action: EditorAiAction;
+  prompt: string;
+  sourceFrom: number;
+  sourceTo: number;
+  sourceText: string;
+  result: EditorAiResult;
 };
 
 type HoveredBlock = { pos: number; top: number; height: number } | null;
@@ -132,8 +143,11 @@ const AiDraft = Node.create({
       cursor.textContent = "▋";
       dom.append(label, body, cursor);
       const paint = (current: typeof node) => {
+        const status = String(current.attrs.status || "streaming");
         body.textContent = String(current.attrs.text || "");
-        dom.dataset.status = String(current.attrs.status || "streaming");
+        dom.dataset.status = status;
+        label.textContent = status === "ready" ? "AI draft ready" : "AI Writer";
+        cursor.hidden = status === "ready";
       };
       paint(node);
       return {
@@ -318,7 +332,7 @@ function blockTargetAtPoint(editor: any, clientX: number, clientY: number) {
   return { pos: clientY > rect.top + rect.height / 2 ? pos + node.nodeSize : pos };
 }
 
-export default function RichKnowledgeEditor({ value, onChange, uploadImage, locale = "en" }: Props) {
+export default function RichKnowledgeEditor({ value, onChange, uploadImage, locale = "en", aiContext }: Props) {
   const { t } = useAdminI18n();
   const [fullscreen, setFullscreen] = useState(false);
   const [pendingUploads, setPendingUploads] = useState(0);
@@ -334,6 +348,8 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
   const [mediaValue, setMediaValue] = useState("");
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
   const [aiPromptValue, setAiPromptValue] = useState("");
+  const [aiPromptAction, setAiPromptAction] = useState<EditorAiAction>("write");
+  const [aiCandidate, setAiCandidate] = useState<AiCandidate | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<any>(null);
@@ -464,6 +480,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
         active.view.dispatch(active.state.tr.delete(from, to));
         suppressPersistRef.current = false;
         setAiReady(true);
+        setAiPromptAction("ask");
         setAiPromptOpen(true);
         return;
       }
@@ -530,7 +547,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
 
   const selection = editor.state.selection;
   const selectedText = selection.empty ? "" : editor.state.doc.textBetween(selection.from, selection.to, "\n").trim();
-  const showAiBar = aiReady || !!selectedText || aiBusy;
+  const showAiBar = aiReady || !!selectedText || aiBusy || !!aiCandidate;
 
   const openLinkModal = () => {
     const current = String(editor.getAttributes("link").href || "");
@@ -570,20 +587,37 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
     setMediaValue("");
   };
 
-  const runAI = async (action: EditorAiAction, customPrompt = "") => {
+  const openAiWriter = (action?: EditorAiAction) => {
     if (aiBusyRef.current) return;
+    if (aiCandidate) {
+      message.info(t("Keep or discard the current AI draft before starting another one"));
+      return;
+    }
+    setAiPromptAction(action || (selectedText ? "ask" : "write"));
+    setAiPromptOpen(true);
+  };
+
+  const runAI = async (action: EditorAiAction, customPrompt = "", allowCandidate = false) => {
+    if (aiBusyRef.current) return;
+    if (aiCandidate && !allowCandidate) {
+      message.info(t("Keep or discard the current AI draft before starting another one"));
+      return;
+    }
     const active = editorRef.current;
     if (!active) return;
 
     const activeSelection = active.state.selection;
     const original = activeSelection.empty ? "" : active.state.doc.textBetween(activeSelection.from, activeSelection.to, "\n");
-    if (!original && !["ask", "extend"].includes(action)) {
+    const selectionRequired = ["rewrite", "fix_grammar", "professional", "casual", "shorten", "summarize", "steps", "bullets", "table", "translate"].includes(action);
+    if (!original && selectionRequired) {
       message.info(t("Select text for this AI action"));
       return;
     }
 
-    let prompt = customPrompt.trim();
-    if (action === "ask" && !prompt) {
+    const prompt = customPrompt.trim();
+    const promptRequired = ["ask", "write", "write_section", "translate"].includes(action);
+    if (promptRequired && !prompt) {
+      setAiPromptAction(action);
       setAiPromptOpen(true);
       return;
     }
@@ -598,7 +632,7 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
 
     const previewPos = afterTopLevelBlock(active, activeSelection.to);
     const fullText = active.getText();
-    const context = fullText.slice(Math.max(0, activeSelection.from - 3500), Math.min(fullText.length, activeSelection.to + 3500));
+    const context = fullText.slice(Math.max(0, activeSelection.from - 6000), Math.min(fullText.length, activeSelection.to + 6000));
 
     const controller = new AbortController();
     aiAbortRef.current?.abort();
@@ -607,7 +641,8 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
     suppressPersistRef.current = true;
     setAiBusy(true);
     setAiReady(false);
-    setAiStatus(t("AI is preparing rich content"));
+    setAiStatus(t("AI Writer is preparing"));
+    setAiCandidate(null);
 
     active.chain().focus().insertContentAt(previewPos, {
       type:"aiDraft",
@@ -616,7 +651,8 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
 
     let draftText = "";
     let flushTimer: number | null = null;
-    const flushDraft = () => {
+    let candidateReady = false;
+    const flushDraft = (status = "streaming") => {
       if (flushTimer !== null) {
         window.clearTimeout(flushTimer);
         flushTimer = null;
@@ -627,17 +663,17 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
       current.view.dispatch(current.state.tr.setNodeMarkup(match.pos, undefined, {
         ...match.node.attrs,
         text:draftText,
-        status:"streaming",
+        status,
       }));
     };
     const queueDraftFlush = () => {
       if (flushTimer !== null) return;
-      flushTimer = window.setTimeout(flushDraft, 70);
+      flushTimer = window.setTimeout(() => flushDraft("streaming"), 70);
     };
 
     try {
       const result = await streamEditorAI(
-        { action, text:original, context, prompt, locale },
+        { action, text:original, context, prompt, locale, documentContext:aiContext },
         (token) => {
           if (!token || controller.signal.aborted) return;
           draftText += token;
@@ -647,37 +683,97 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
         (status) => setAiStatus(t(status)),
       );
 
-      flushDraft();
+      draftText = result.text || draftText;
+      flushDraft("ready");
       const current = editorRef.current;
       const match = findAiDraft(draftId);
       if (!current || !match) throw new Error("AI preview was interrupted");
 
-      current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
-      aiBusyRef.current = false;
-      suppressPersistRef.current = pendingUploadsRef.current > 0;
+      candidateReady = true;
+      setAiCandidate({
+        draftId,
+        action,
+        prompt,
+        sourceFrom:replaceFrom,
+        sourceTo:replaceTo,
+        sourceText:original,
+        result,
+      });
 
-      const richContent = Array.isArray(result.document?.content) && result.document.content.length
-        ? result.document.content
-        : [{ type:"paragraph", content:result.text ? [{ type:"text", text:result.text }] : [] }];
-
-      current.chain().focus().insertContentAt({ from:replaceFrom, to:replaceTo }, richContent).run();
-      persistEditor(current);
-      if (result.degraded) message.warning(t("AI completed with plain-text fallback formatting"));
-      else message.success(t("AI rich content inserted"));
+      if (result.degraded) {
+        message.warning(t("AI Writer completed, but some advanced formatting was simplified"));
+      } else if (result.repaired) {
+        message.success(t("AI Writer completed and repaired the rich formatting automatically"));
+      } else {
+        message.success(t("AI Writer draft is ready"));
+      }
     } catch (error: any) {
       if (flushTimer !== null) window.clearTimeout(flushTimer);
       const current = editorRef.current;
       const match = findAiDraft(draftId);
       if (current && match) current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
-      if (error?.name !== "AbortError") message.error(error?.message || t("AI writing failed"));
+      if (error?.name !== "AbortError") message.error(error?.message || t("AI Writer failed"));
     } finally {
       aiBusyRef.current = false;
-      suppressPersistRef.current = pendingUploadsRef.current > 0;
+      suppressPersistRef.current = candidateReady || pendingUploadsRef.current > 0;
       setAiBusy(false);
       setAiStatus("");
       aiAbortRef.current = null;
       if (!suppressPersistRef.current) persistEditor(editorRef.current);
     }
+  };
+
+  const discardAiCandidate = () => {
+    const current = editorRef.current;
+    if (!current || !aiCandidate) return;
+    const match = findAiDraft(aiCandidate.draftId);
+    if (match) current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
+    setAiCandidate(null);
+    suppressPersistRef.current = pendingUploadsRef.current > 0;
+    if (!suppressPersistRef.current) persistEditor(current);
+  };
+
+  const commitAiCandidate = (mode: "replace" | "below" | "cursor") => {
+    const current = editorRef.current;
+    if (!current || !aiCandidate) return;
+    const match = findAiDraft(aiCandidate.draftId);
+    if (!match) {
+      message.error(t("AI draft could not be found"));
+      setAiCandidate(null);
+      suppressPersistRef.current = pendingUploadsRef.current > 0;
+      return;
+    }
+
+    const richContent = Array.isArray(aiCandidate.result.document?.content) && aiCandidate.result.document.content.length
+      ? aiCandidate.result.document.content
+      : [{ type:"paragraph", content:aiCandidate.result.text ? [{ type:"text", text:aiCandidate.result.text }] : [] }];
+
+    const draftPos = match.pos;
+    current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
+
+    if (mode === "replace") {
+      current.chain().focus().insertContentAt({ from:aiCandidate.sourceFrom, to:aiCandidate.sourceTo }, richContent).run();
+    } else if (mode === "cursor") {
+      current.chain().focus().insertContentAt(aiCandidate.sourceFrom, richContent).run();
+    } else {
+      current.chain().focus().insertContentAt(draftPos, richContent).run();
+    }
+
+    setAiCandidate(null);
+    suppressPersistRef.current = pendingUploadsRef.current > 0;
+    if (!suppressPersistRef.current) persistEditor(current);
+    message.success(t("AI Writer content inserted"));
+  };
+
+  const regenerateAiCandidate = () => {
+    const current = editorRef.current;
+    const candidate = aiCandidate;
+    if (!current || !candidate) return;
+    const match = findAiDraft(candidate.draftId);
+    if (match) current.view.dispatch(current.state.tr.delete(match.pos, match.pos + match.node.nodeSize));
+    setAiCandidate(null);
+    current.commands.setTextSelection({ from:candidate.sourceFrom, to:candidate.sourceTo });
+    window.setTimeout(() => void runAI(candidate.action, candidate.prompt, true), 0);
   };
 
   const tool = (title: string, icon: React.ReactNode, action: () => void, active = false, danger = false) => (
@@ -703,18 +799,31 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
     },
   };
 
+  const aiActionOptions: Array<{ value: EditorAiAction; label: string; needsPrompt?: boolean }> = [
+    { value:"write", label:t("Write from scratch"), needsPrompt:true },
+    { value:"write_section", label:t("Write a section"), needsPrompt:true },
+    { value:"extend", label:t("Continue writing") },
+    { value:"rewrite", label:t("Rewrite selection") },
+    { value:"fix_grammar", label:t("Fix Grammar") },
+    { value:"professional", label:t("Professional Tone") },
+    { value:"casual", label:t("Friendly Tone") },
+    { value:"shorten", label:t("Shorten") },
+    { value:"expand", label:t("Expand") },
+    { value:"summarize", label:t("Summarize Selection") },
+    { value:"steps", label:t("Turn into steps") },
+    { value:"bullets", label:t("Turn into bullets") },
+    { value:"table", label:t("Turn into table") },
+    { value:"translate", label:t("Translate"), needsPrompt:true },
+    { value:"ask", label:t("Custom instruction"), needsPrompt:true },
+  ];
+
   const aiMenu = {
-    items: [
-      { key: "fix_grammar", label: t("Fix Grammar") },
-      { key: "professional", label: t("Professional Tone") },
-      { key: "casual", label: t("Casual Tone") },
-      { key: "summarize", label: t("Summarize Selection") },
-      { key: "extend", label: t("Extend Writing") },
-      { key: "ask", label: t("Custom AI Prompt…") },
-    ],
+    items: aiActionOptions.map((item) => ({ key:item.value, label:item.label })),
     onClick: ({ key }: { key: string }) => {
-      if (key === "ask") setAiPromptOpen(true);
-      else void runAI(key as EditorAiAction);
+      const action = key as EditorAiAction;
+      const option = aiActionOptions.find((item) => item.value === action);
+      if (option?.needsPrompt) openAiWriter(action);
+      else void runAI(action);
     },
   };
 
@@ -775,8 +884,18 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
           <Dropdown menu={insertMenu} trigger={["click"]}>
             <Button size="small" icon={<PlusOutlined />}>{t("Insert")}</Button>
           </Dropdown>
-          <Dropdown menu={aiMenu} trigger={["click"]} disabled={aiBusy}>
-            <Button size="small" type={selectedText || aiReady ? "primary" : "default"} loading={aiBusy} icon={<RobotOutlined />}>{t("Ask AI")}</Button>
+          <Button
+            size="small"
+            type={selectedText || aiReady || aiCandidate ? "primary" : "default"}
+            loading={aiBusy}
+            icon={<RobotOutlined />}
+            onClick={() => openAiWriter()}
+            disabled={!!aiCandidate && !aiBusy}
+          >
+            {t("AI Writer")}
+          </Button>
+          <Dropdown menu={aiMenu} trigger={["click"]} disabled={aiBusy || !!aiCandidate}>
+            <Button size="small">{t("AI actions")}</Button>
           </Dropdown>
           <Divider orientation="vertical" />
           {tool("Undo", <UndoOutlined />, () => editor.chain().focus().undo().run())}
@@ -793,11 +912,29 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
           {showAiBar && (
             <Space size={4} wrap>
               <RobotOutlined />
-              <span>{aiBusy ? (aiStatus || t("AI is writing and formatting…")) : selectedText ? t("AI actions for selection") : t("Ask AI on this line")}</span>
-              {!aiBusy && <Button size="small" onClick={() => void runAI("fix_grammar")}>{t("Fix Grammar")}</Button>}
-              {!aiBusy && <Button size="small" onClick={() => void runAI("professional")}>{t("Professional")}</Button>}
-              {!aiBusy && <Button size="small" onClick={() => void runAI("summarize")}>{t("Summarize")}</Button>}
-              {aiBusy && <Button size="small" danger onClick={() => aiAbortRef.current?.abort()}>{t("Stop")}</Button>}
+              {aiCandidate ? (
+                <>
+                  <Tag color={aiCandidate.result.degraded ? "gold" : "blue"}>
+                    {aiCandidate.result.degraded ? t("AI draft · simplified formatting") : t("AI draft ready")}
+                  </Tag>
+                  <Button size="small" type="primary" onClick={() => commitAiCandidate("replace")}>
+                    {aiCandidate.sourceText ? t("Replace selection") : t("Insert here")}
+                  </Button>
+                  <Button size="small" onClick={() => commitAiCandidate("below")}>{t("Insert below")}</Button>
+                  <Button size="small" onClick={() => commitAiCandidate("cursor")}>{t("Insert at cursor")}</Button>
+                  <Button size="small" onClick={regenerateAiCandidate}>{t("Regenerate")}</Button>
+                  <Button size="small" danger onClick={discardAiCandidate}>{t("Discard")}</Button>
+                </>
+              ) : (
+                <>
+                  <span>{aiBusy ? (aiStatus || t("AI Writer is working…")) : selectedText ? t("AI actions for selection") : t("AI Writer is ready")}</span>
+                  {!aiBusy && selectedText && <Button size="small" onClick={() => void runAI("fix_grammar")}>{t("Fix Grammar")}</Button>}
+                  {!aiBusy && selectedText && <Button size="small" onClick={() => void runAI("professional")}>{t("Professional")}</Button>}
+                  {!aiBusy && selectedText && <Button size="small" onClick={() => void runAI("summarize")}>{t("Summarize")}</Button>}
+                  {!aiBusy && <Button size="small" type="primary" onClick={() => openAiWriter()}>{t("Open AI Writer")}</Button>}
+                  {aiBusy && <Button size="small" danger onClick={() => aiAbortRef.current?.abort()}>{t("Stop")}</Button>}
+                </>
+              )}
             </Space>
           )}
           {editor.isActive("table") && (
@@ -899,27 +1036,68 @@ export default function RichKnowledgeEditor({ value, onChange, uploadImage, loca
       </Modal>
 
       <Modal
-        title={t("Ask AI")}
+        title={<Space><RobotOutlined /><span>{t("AI Writer")}</span></Space>}
         open={aiPromptOpen}
+        width={720}
         onOk={() => {
           const prompt = aiPromptValue.trim();
-          if (!prompt) return message.info(t("Enter an instruction for AI"));
+          const option = aiActionOptions.find((item) => item.value === aiPromptAction);
+          if (option?.needsPrompt && !prompt) return message.info(t("Tell AI what you want it to write or change"));
           setAiPromptOpen(false);
-          setAiPromptValue("");
-          void runAI("ask", prompt);
+          void runAI(aiPromptAction, prompt);
         }}
         onCancel={() => setAiPromptOpen(false)}
-        okText={t("Generate")}
+        okText={t("Generate draft")}
         confirmLoading={aiBusy}
         destroyOnHidden
       >
-        <Input.TextArea
-          autoFocus
-          rows={5}
-          value={aiPromptValue}
-          onChange={(event) => setAiPromptValue(event.target.value)}
-          placeholder={t("Example: Turn this into a 3-column table, make the warning text red, and highlight the deadline in yellow.")}
-        />
+        <Space direction="vertical" size={12} style={{ width:"100%" }}>
+          <div>
+            <div style={{ marginBottom:6, fontWeight:600 }}>{t("What should AI do?")}</div>
+            <Select
+              value={aiPromptAction}
+              onChange={(value) => setAiPromptAction(value)}
+              options={aiActionOptions}
+              style={{ width:"100%" }}
+            />
+          </div>
+
+          <div>
+            <div style={{ marginBottom:6, fontWeight:600 }}>{t("Instruction")}</div>
+            <Input.TextArea
+              autoFocus
+              rows={7}
+              maxLength={10000}
+              showCount
+              value={aiPromptValue}
+              onChange={(event) => setAiPromptValue(event.target.value)}
+              placeholder={t("Tell AI exactly what to write, rewrite, format, translate, expand, summarize, or organize. Example: Write a complete professional withdrawal guide with an introduction, requirements, 5 numbered steps, a warning box, troubleshooting tips, and a 3-column table. Make warnings red and highlight important deadlines in yellow.")}
+            />
+          </div>
+
+          <div>
+            <div style={{ marginBottom:6, color:"#8ea0bd", fontSize:12 }}>{t("Quick instructions")}</div>
+            <Space wrap>
+              <Button size="small" onClick={() => { setAiPromptAction("write"); setAiPromptValue("Write a complete professional guide with a clear introduction, requirements, numbered steps, important warning, troubleshooting section, and a concise summary."); }}>{t("Complete guide")}</Button>
+              <Button size="small" onClick={() => { setAiPromptAction("table"); setAiPromptValue("Turn the selected information into a clear 3-column comparison table with concise headings."); }}>{t("Make a table")}</Button>
+              <Button size="small" onClick={() => { setAiPromptAction("ask"); setAiPromptValue("Rewrite this section professionally. Make the warning text red and highlight the most important sentence in yellow."); }}>{t("Format warnings")}</Button>
+              <Button size="small" onClick={() => { setAiPromptAction("translate"); setAiPromptValue("Translate the selected content into Simplified Chinese while preserving the formatting and meaning."); }}>{t("Translate")}</Button>
+            </Space>
+          </div>
+
+          <div style={{ padding:"10px 12px", border:"1px solid #243451", borderRadius:8, background:"#0d1727" }}>
+            <Space wrap>
+              <Tag color="blue">{locale.toUpperCase()}</Tag>
+              {selectedText && <Tag>{t("Selection")} · {selectedText.length} {t("characters")}</Tag>}
+              {aiContext?.title && <Tag>{t("Guide")} · {aiContext.title}</Tag>}
+              {aiContext?.topics?.slice(0, 3).map((topic) => <Tag key={topic}>{topic}</Tag>)}
+              {aiContext?.tags?.slice(0, 3).map((tag) => <Tag key={tag} color="purple">{tag}</Tag>)}
+            </Space>
+            <div style={{ marginTop:6, color:"#8ea0bd", fontSize:12 }}>
+              {t("AI Writer can create new content from scratch. Editing actions preserve supplied facts; writing actions can create structure and general explanatory content without inventing platform-specific policies or amounts.")}
+            </div>
+          </div>
+        </Space>
       </Modal>
     </div>
   );

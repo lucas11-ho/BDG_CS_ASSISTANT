@@ -494,27 +494,63 @@ async function uploadSupportFile(file: File, path: string, caption = "") {
   return payload;
 }
 
-export type EditorAiAction = 'ask' | 'fix_grammar' | 'professional' | 'casual' | 'summarize' | 'extend';
+export type EditorAiAction =
+  | 'ask'
+  | 'write'
+  | 'write_section'
+  | 'rewrite'
+  | 'fix_grammar'
+  | 'professional'
+  | 'casual'
+  | 'shorten'
+  | 'expand'
+  | 'summarize'
+  | 'steps'
+  | 'bullets'
+  | 'table'
+  | 'translate'
+  | 'extend';
+
+export type EditorAiDocumentContext = {
+  documentType?: string;
+  title?: string;
+  summary?: string;
+  platformName?: string;
+  languageLabel?: string;
+  topics?: string[];
+  tags?: string[];
+};
+
 export type EditorAiResult = {
   text: string;
   document: { type: 'doc'; content: any[] };
   degraded?: boolean;
+  repaired?: boolean;
+  formatError?: string;
+  action?: EditorAiAction;
 };
 
 export async function streamEditorAI(
-  payload: { action: EditorAiAction; text?: string; context?: string; prompt?: string; locale?: string },
+  payload: {
+    action: EditorAiAction;
+    text?: string;
+    context?: string;
+    prompt?: string;
+    locale?: string;
+    documentContext?: EditorAiDocumentContext;
+  },
   onToken: (text: string) => void,
   signal?: AbortSignal,
   onStatus?: (message: string) => void,
 ): Promise<EditorAiResult> {
   if (MOCK_MODE) {
-    const text = payload.text ? `Improved: ${payload.text}` : 'AI generated editor content.';
+    const text = payload.text ? `Improved: ${payload.text}` : 'AI Writer generated editor content.';
     for (const part of text.split(/(\s+)/)) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       onToken(part);
       await new Promise((resolve) => setTimeout(resolve, 16));
     }
-    return { text, document:{ type:'doc', content:[{ type:'paragraph', content:[{ type:'text', text }] }] } };
+    return { text, action:payload.action, document:{ type:'doc', content:[{ type:'paragraph', content:[{ type:'text', text }] }] } };
   }
   if (!API_BASE_URL) throw new Error('Admin API is not configured. Set VITE_API_BASE_URL during the production build.');
   const token = getToken();
@@ -532,7 +568,7 @@ export async function streamEditorAI(
   });
   if (!response.ok || !response.body) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body?.error || `AI writing assistant failed (${response.status})`);
+    throw new Error(body?.error || `AI Writer failed (${response.status})`);
   }
 
   const reader = response.body.getReader();
@@ -570,9 +606,12 @@ export async function streamEditorAI(
             text:String(parsed.text || finalText || ''),
             document:parsed.document,
             degraded:parsed.degraded === true,
+            repaired:parsed.repaired === true,
+            formatError:String(parsed.format_error || ''),
+            action:parsed.action || payload.action,
           };
         }
-        if (event === 'error') throw new Error(parsed.error || 'AI stream failed');
+        if (event === 'error') throw new Error(parsed.error || 'AI Writer stream failed');
       }
     }
   } finally {
@@ -583,10 +622,11 @@ export async function streamEditorAI(
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   if (result) return result;
   const text = finalText.trim();
-  if (!text) throw new Error('AI finished without returning content. Please try again.');
+  if (!text) throw new Error('AI Writer finished without returning content. Please try again.');
   return {
     text,
     degraded:true,
+    action:payload.action,
     document:{ type:'doc', content:[{ type:'paragraph', content:[{ type:'text', text }] }] },
   };
 }
