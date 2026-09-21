@@ -73,6 +73,10 @@ function FaqStudioPage() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [form] = Form.useForm();
+  const watchedLocale = Form.useWatch("locale", form);
+  const watchedQuestion = Form.useWatch("question", form);
+  const watchedTopic = Form.useWatch("topic", form);
+  const watchedTagIds = Form.useWatch("tag_ids", form) as number[] | undefined;
 
   const load = async () => {
     setLoading(true);
@@ -233,7 +237,19 @@ function FaqStudioPage() {
         <Form.Item name="tag_ids" label="Tags" extra="Optional flexible labels. Manage your own Tags from Content → Tags."><Select mode="multiple" allowClear showSearch optionFilterProp="label" options={tags.filter((tag) => tag.status === "active").map((tag) => ({ value: tag.id, label: tag.name }))} /></Form.Item>
         <Form.Item name="keywords" label="Search keywords and misspellings"><Input.TextArea rows={3} /></Form.Item>
         <Form.Item name="answer" hidden><Input /></Form.Item>
-        <Form.Item label="FAQ answer — rich editor"><RichKnowledgeEditor value={answerJson} onChange={(json, html) => { setAnswerJson(json); setAnswerHtml(html); }} uploadImage={uploadImage} /></Form.Item>
+        <Form.Item label="FAQ answer — rich editor"><RichKnowledgeEditor
+          value={answerJson}
+          locale={String(watchedLocale || editing?.locale || defaultLocale || "en")}
+          aiContext={{
+            documentType: "faq",
+            title: String(watchedQuestion || editing?.question || ""),
+            summary: String(watchedTopic || editing?.topic || "General"),
+            languageLabel: String(watchedLocale || editing?.locale || defaultLocale || "en").toUpperCase(),
+            tags: tags.filter((tag) => (watchedTagIds || editing?.tag_ids || []).map(Number).includes(Number(tag.id))).map((tag) => tag.name),
+          }}
+          onChange={(json, html) => { setAnswerJson(json); setAnswerHtml(html); }}
+          uploadImage={uploadImage}
+        /></Form.Item>
         <Space direction="vertical" style={{ width: "100%" }}>
           <Space><Upload showUploadList={false} beforeUpload={addImage} accept="image/png,image/jpeg,image/webp,image/gif"><Button icon={<UploadOutlined />}>Upload FAQ image</Button></Upload><span style={{ color: "#8ea0bd" }}>{imageUrls.length} image(s)</span></Space>
           {imageUrls.map((url, index) => <Space key={`${url}-${index}`} style={{ width: "100%" }}><img src={url} alt={`FAQ ${index + 1}`} style={{ width: 72, height: 48, objectFit: "cover", borderRadius: 6 }} /><Input value={url} readOnly /><Button danger onClick={() => setImageUrls((all) => all.filter((_, itemIndex) => itemIndex !== index))}>Remove</Button></Space>)}
