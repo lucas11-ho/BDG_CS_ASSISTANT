@@ -569,7 +569,7 @@ async function syncMediaJob(query, jobDbId) {
   };
 
   const updated = (await query(`UPDATE platform_transfer_jobs SET
-      status=$1,
+      status=$1::varchar(24),
       result_json=$2::jsonb,
       media_total_files=$3,
       media_completed_files=$4,
@@ -577,7 +577,7 @@ async function syncMediaJob(query, jobDbId) {
       media_total_bytes=$6,
       media_completed_bytes=$7,
       media_last_progress_at=NOW(),
-      completed_at=CASE WHEN $1='completed' THEN COALESCE(completed_at,NOW()) ELSE completed_at END,
+      completed_at=CASE WHEN $1::varchar(24)='completed' THEN COALESCE(completed_at,NOW()) ELSE completed_at END,
       error_code=$8,
       error_message=$9,
       updated_at=NOW()
@@ -769,7 +769,7 @@ export async function applyPlatformTransfer({ env, query, withTransaction, scope
 
       const nextStatus = media.total_files ? 'running' : 'completed';
       const row = (await tx(`UPDATE platform_transfer_jobs SET
-        status=$1,
+        status=$1::varchar(24),
         result_json=$2::jsonb,
         rollback_json=$3::jsonb,
         rollback_expires_at=NOW()+INTERVAL '${ROLLBACK_DAYS} days',
@@ -781,7 +781,7 @@ export async function applyPlatformTransfer({ env, query, withTransaction, scope
         media_completed_bytes=0,
         media_batch_size=$5,
         media_last_progress_at=NOW(),
-        completed_at=CASE WHEN $1='completed' THEN NOW() ELSE NULL END,
+        completed_at=CASE WHEN $1::varchar(24)='completed' THEN NOW() ELSE NULL END,
         updated_at=NOW()
         WHERE id=$6 RETURNING *`, [
           nextStatus,JSON.stringify(imported.result),JSON.stringify(imported.rollback),
@@ -790,8 +790,8 @@ export async function applyPlatformTransfer({ env, query, withTransaction, scope
 
       await tx(`UPDATE platform_transfer_grants SET
         manifest_ciphertext='',manifest_checksum='',manifest_purged_at=NOW(),
-        status=CASE WHEN $1='completed' THEN 'completed' ELSE status END,
-        completed_at=CASE WHEN $1='completed' THEN NOW() ELSE completed_at END,
+        status=CASE WHEN $1::varchar(24)='completed' THEN 'completed' ELSE status END,
+        completed_at=CASE WHEN $1::varchar(24)='completed' THEN NOW() ELSE completed_at END,
         updated_at=NOW()
         WHERE id=$2`, [nextStatus,claimed.grant_id]);
       return row;
