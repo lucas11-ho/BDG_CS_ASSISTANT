@@ -20,7 +20,7 @@ for (const marker of [
   'AES-GCM','MAX_MANIFEST_BYTES','GRANT_TTL_MINUTES = 30','ROLLBACK_DAYS = 7',
   'safeHashEqual','TRANSFER_KEY_ALREADY_USED','TRANSFER_KEY_LOCKED','TRANSFER_SAME_PLATFORM',
   "manifest_ciphertext=''",'sanitizeRichHtml',
-  "status:'draft'","approval_status:'draft'",'copyOwnedMedia','TRANSFER_MEDIA_MISSING',
+  "status:'draft'","approval_status:'draft'",'prepareMediaQueue','platform_transfer_media_items',
   "'administrators'",'provider_secrets','connector_secrets','rollbackPlatformTransfer',
 ]) assert.ok(transfer.includes(marker),`missing secure transfer behavior: ${marker}`);
 
@@ -34,12 +34,12 @@ assert.ok(core.includes("['tenant_owner','platform_owner']"));
 assert.ok(core.includes("!permission.startsWith('platform.transfer.')"));
 
 for (const marker of [
-  'createPlatformTransferGrant','claimPlatformTransfer','applyPlatformTransfer','rollbackPlatformTransfer',
+  'createPlatformTransferGrant','claimPlatformTransfer','applyPlatformTransfer','continuePlatformTransferMedia','retryPlatformTransferMedia','rollbackPlatformTransfer',
 ]) assert.ok(api.includes(marker),`missing Admin API function: ${marker}`);
 
 for (const marker of [
   'Old platform: Generate transfer key','New platform: Paste transfer key','Required transfer preview',
-  'Type the destination platform name','Security exclusions','Type ROLLBACK to confirm',
+  'Type the destination platform name','Security exclusions','Type ROLLBACK to confirm','Resume media copy','Retry failed media',
 ]) assert.ok(ui.includes(marker),`missing Transfer Center UI: ${marker}`);
 
 assert.equal(transfer.includes('api_key'),true,'Provider/API secrets must be explicitly excluded');
