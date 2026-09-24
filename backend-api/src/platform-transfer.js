@@ -410,6 +410,7 @@ function collectOwnedMediaKeys(value, source) {
   const prefix = `tenant-${source.tenant_id}/platform-${source.platform_id}/`;
   const visit = (item) => {
     if (typeof item === 'string') {
+      if (item.startsWith(prefix)) keys.add(item);
       const regex = /\/uploads\/([^\s"'<>),\\]+)/g;
       for (const match of item.matchAll(regex)) {
         try { const key = decodeURIComponent(match[1]); if (key.startsWith(prefix)) keys.add(key); } catch (_) {}
