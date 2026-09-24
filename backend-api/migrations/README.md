@@ -63,3 +63,11 @@ log required for read-only Shop facts in Luke AI. Long-lived Shop credentials
 remain encrypted in Luke CS, while AI tool execution uses signed customer
 context and short-lived Shop service tokens. Published migration `048` is
 immutable. The next database change must use migration `049`.
+
+
+Migration `058_v1.27.0_resumable_platform_transfer_media.sql` adds a durable
+per-file media queue for Platform Transfer. Large Guide libraries import their
+database records first, then copy owned R2 media in verified resumable batches.
+Each file has independent retry state, completed work survives browser refreshes,
+and completed or media-failed imports remain eligible for the existing rollback
+window. Published migration `058` is immutable after deployment.
