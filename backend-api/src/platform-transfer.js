@@ -431,31 +431,207 @@ async function bodyBytes(body) {
     while (true) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); length += value.byteLength; }
     const out = new Uint8Array(length); let offset = 0; for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.byteLength; } return out;
   }
-  if (body?.[Symbol.asyncIterator]) { const chunks = []; let length = 0; for await (const chunk of body) { const bytes = new Uint8Array(chunk); chunks.push(bytes); length += bytes.byteLength; } const out = new Uint8Array(length); let offset=0; for (const bytes of chunks) { out.set(bytes,offset); offset += bytes.byteLength; } return out; }
+  if (body?.[Symbol.asyncIterator]) {
+    const chunks = [];
+    let length = 0;
+    for await (const chunk of body) {
+      const bytes = new Uint8Array(chunk);
+      chunks.push(bytes);
+      length += bytes.byteLength;
+    }
+    const out = new Uint8Array(length);
+    let offset = 0;
+    for (const bytes of chunks) { out.set(bytes,offset); offset += bytes.byteLength; }
+    return out;
+  }
   return new Uint8Array(await new Response(body).arrayBuffer());
 }
 
-async function copyOwnedMedia(env, manifest, targetScope, jobId) {
+async function prepareMediaQueue(query, manifest, targetScope, jobDbId, jobPublicId) {
   const keys = collectOwnedMediaKeys(manifest, manifest.source);
-  if (!keys.length) return { replacements:new Map(), copied:[] };
-  if (!env.GUIDE_IMAGES) fail('Platform media storage is not configured', 503, 'TRANSFER_MEDIA_STORAGE_NOT_CONFIGURED');
-  if (keys.length > MAX_MEDIA_FILES) fail('Transfer contains too many media files', 413, 'TRANSFER_MEDIA_LIMIT');
-  const replacements = new Map();
-  const copied = [];
-  let totalBytes = 0;
-  for (const key of keys) {
-    const object = await env.GUIDE_IMAGES.get(key);
-    if (!object) fail(`A source media file is missing: ${key.split('/').pop()}`, 409, 'TRANSFER_MEDIA_MISSING');
-    const bytes = await bodyBytes(object.body);
-    totalBytes += bytes.byteLength;
-    if (totalBytes > MAX_MEDIA_BYTES) fail('Transfer media exceeds the secure copy limit', 413, 'TRANSFER_MEDIA_LIMIT');
-    const tail = key.split('/').pop();
-    const targetKey = `tenant-${targetScope.tenant_id}/platform-${targetScope.platform_id}/transfer-${jobId}/${crypto.randomUUID()}-${tail}`;
-    await env.GUIDE_IMAGES.put(targetKey, bytes, { httpMetadata:{ contentType:object.httpMetadata?.contentType || 'application/octet-stream' }, contentLength:bytes.byteLength });
-    replacements.set(key, targetKey);
-    copied.push(targetKey);
+  if (keys.length > MAX_MEDIA_FILES) {
+    fail(`Transfer contains ${keys.length} media files; the large-library limit is ${MAX_MEDIA_FILES}`, 413, 'TRANSFER_MEDIA_LIMIT');
   }
-  return { replacements,copied,total_bytes:totalBytes };
+  const replacements = new Map();
+  for (const sourceKey of keys) {
+    const rawTail = sourceKey.split('/').pop() || 'media';
+    const tail = rawTail.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(-180) || 'media';
+    const proposedTarget = `tenant-${targetScope.tenant_id}/platform-${targetScope.platform_id}/transfer-${jobPublicId}/${crypto.randomUUID()}-${tail}`;
+    const item = (await query(`INSERT INTO platform_transfer_media_items(job_id,source_key,target_key,status)
+      VALUES($1,$2,$3,'pending')
+      ON CONFLICT(job_id,source_key) DO UPDATE SET source_key=EXCLUDED.source_key
+      RETURNING target_key`, [jobDbId,sourceKey,proposedTarget])).rows[0];
+    replacements.set(sourceKey,String(item?.target_key || proposedTarget));
+  }
+  return { replacements,total_files:keys.length };
+}
+
+async function verifyCopiedMedia(env, targetKey, expectedBytes) {
+  let object = null;
+  if (env.GUIDE_IMAGES?.head) object = await env.GUIDE_IMAGES.head(targetKey);
+  else if (env.GUIDE_IMAGES?.get) object = await env.GUIDE_IMAGES.get(targetKey,{ rangeHeader:'bytes=0-0' });
+  if (!object) throw new Error('Copied media could not be verified in destination storage');
+  let actual = Number(object.contentLength);
+  if ((!Number.isFinite(actual) || actual < 0) && object.contentRange) {
+    const match = /\/(\d+)$/.exec(String(object.contentRange));
+    if (match) actual = Number(match[1]);
+  }
+  try { await object.body?.cancel?.(); } catch {}
+  if (Number.isFinite(expectedBytes) && expectedBytes >= 0 && Number.isFinite(actual) && actual !== expectedBytes) {
+    throw new Error(`Copied media size verification failed (expected ${expectedBytes}, got ${actual})`);
+  }
+  return Number.isFinite(actual) ? actual : expectedBytes;
+}
+
+async function resetStaleMediaClaims(query, jobDbId) {
+  await query(`UPDATE platform_transfer_media_items
+    SET status='failed',last_error='Previous media-copy request was interrupted; queued for retry',updated_at=NOW()
+    WHERE job_id=$1 AND status='copying' AND updated_at < NOW()-INTERVAL '5 minutes'`, [jobDbId]);
+}
+
+async function claimNextMediaItem(withTransaction, jobDbId) {
+  return withTransaction(async (tx) => {
+    const row = (await tx(`WITH picked AS (
+        SELECT id FROM platform_transfer_media_items
+        WHERE job_id=$1
+          AND (status='pending' OR (status='failed' AND attempts < $2))
+        ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END,id
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      )
+      UPDATE platform_transfer_media_items item
+      SET status='copying',attempts=item.attempts+1,last_error=NULL,updated_at=NOW()
+      FROM picked
+      WHERE item.id=picked.id
+      RETURNING item.*`, [jobDbId,MAX_MEDIA_ATTEMPTS])).rows[0];
+    return row || null;
+  });
+}
+
+async function mediaProgress(query, jobDbId) {
+  const stats = (await query(`SELECT
+      COUNT(*)::int AS total_files,
+      COUNT(*) FILTER (WHERE status='completed')::int AS completed_files,
+      COUNT(*) FILTER (WHERE status='failed')::int AS failed_files,
+      COUNT(*) FILTER (WHERE status='pending' OR (status='failed' AND attempts < $2))::int AS retryable_files,
+      COUNT(*) FILTER (WHERE status='copying')::int AS copying_files,
+      COALESCE(SUM(size_bytes),0)::bigint AS total_bytes,
+      COALESCE(SUM(size_bytes) FILTER (WHERE status='completed'),0)::bigint AS completed_bytes
+    FROM platform_transfer_media_items WHERE job_id=$1`, [jobDbId,MAX_MEDIA_ATTEMPTS])).rows[0] || {};
+  return {
+    total_files:Number(stats.total_files || 0),
+    completed_files:Number(stats.completed_files || 0),
+    failed_files:Number(stats.failed_files || 0),
+    retryable_files:Number(stats.retryable_files || 0),
+    copying_files:Number(stats.copying_files || 0),
+    total_bytes:Number(stats.total_bytes || 0),
+    completed_bytes:Number(stats.completed_bytes || 0),
+  };
+}
+
+async function syncMediaJob(query, jobDbId) {
+  const stats = await mediaProgress(query,jobDbId);
+  const current = (await query(`SELECT * FROM platform_transfer_jobs WHERE id=$1 LIMIT 1`, [jobDbId])).rows[0];
+  if (!current) fail('Transfer job was not found',404,'TRANSFER_JOB_NOT_FOUND');
+
+  let nextStatus = String(current.status || 'running');
+  let errorCode = current.error_code || null;
+  let errorMessage = current.error_message || null;
+  const allDone = stats.total_files === stats.completed_files;
+  const exhausted = !allDone && stats.retryable_files === 0 && stats.copying_files === 0 && stats.failed_files > 0;
+
+  if (allDone) {
+    nextStatus = 'completed';
+    errorCode = null;
+    errorMessage = null;
+  } else if (exhausted) {
+    nextStatus = 'failed';
+    errorCode = 'TRANSFER_MEDIA_INCOMPLETE';
+    errorMessage = `${stats.failed_files} media file(s) could not be copied after ${MAX_MEDIA_ATTEMPTS} attempts`;
+  } else {
+    nextStatus = 'running';
+    errorCode = null;
+    errorMessage = null;
+  }
+
+  const result = {
+    ...(current.result_json || {}),
+    media_files:stats.total_files,
+    media_bytes:stats.completed_bytes,
+    media:{
+      total_files:stats.total_files,
+      completed_files:stats.completed_files,
+      failed_files:stats.failed_files,
+      total_bytes:stats.total_bytes,
+      completed_bytes:stats.completed_bytes,
+    },
+  };
+
+  const updated = (await query(`UPDATE platform_transfer_jobs SET
+      status=$1,
+      result_json=$2::jsonb,
+      media_total_files=$3,
+      media_completed_files=$4,
+      media_failed_files=$5,
+      media_total_bytes=$6,
+      media_completed_bytes=$7,
+      media_last_progress_at=NOW(),
+      completed_at=CASE WHEN $1='completed' THEN COALESCE(completed_at,NOW()) ELSE completed_at END,
+      error_code=$8,
+      error_message=$9,
+      updated_at=NOW()
+    WHERE id=$10 RETURNING *`, [
+      nextStatus,JSON.stringify(result),stats.total_files,stats.completed_files,stats.failed_files,
+      stats.total_bytes,stats.completed_bytes,errorCode,errorMessage,jobDbId,
+    ])).rows[0];
+
+  if (nextStatus === 'completed' || nextStatus === 'failed') {
+    await query(`UPDATE platform_transfer_grants SET
+      status='completed',completed_at=COALESCE(completed_at,NOW()),
+      manifest_ciphertext='',manifest_checksum='',manifest_purged_at=COALESCE(manifest_purged_at,NOW()),updated_at=NOW()
+      WHERE id=$1 AND status='claimed'`, [current.grant_id]);
+  }
+  return updated;
+}
+
+async function copyQueuedMediaItem(env, query, job, item) {
+  try {
+    const source = await env.GUIDE_IMAGES.get(item.source_key);
+    if (!source) throw new Error(`Source media is missing: ${String(item.source_key).split('/').pop()}`);
+
+    let size = Number(source.contentLength);
+    let payload = source.body;
+    if (!Number.isFinite(size) || size < 0) {
+      const bytes = await bodyBytes(source.body);
+      payload = bytes;
+      size = bytes.byteLength;
+    }
+
+    const projected = Number(job.media_completed_bytes || 0) + size;
+    if (projected > MAX_MEDIA_BYTES) {
+      await query(`UPDATE platform_transfer_media_items SET status='failed',attempts=$1,size_bytes=$2,
+        last_error=$3,updated_at=NOW() WHERE id=$4`, [
+        MAX_MEDIA_ATTEMPTS,size,`Transfer media exceeds the ${Math.round(MAX_MEDIA_BYTES/(1024*1024*1024))} GB large-library limit`,item.id,
+      ]);
+      return false;
+    }
+
+    await env.GUIDE_IMAGES.put(item.target_key,payload,{
+      httpMetadata:{ contentType:source.httpMetadata?.contentType || 'application/octet-stream' },
+      contentLength:size,
+    });
+    const verifiedBytes = await verifyCopiedMedia(env,item.target_key,size);
+    await query(`UPDATE platform_transfer_media_items SET
+      status='completed',content_type=$1,size_bytes=$2,last_error=NULL,verified_at=NOW(),updated_at=NOW()
+      WHERE id=$3`, [source.httpMetadata?.contentType || 'application/octet-stream',Number(verifiedBytes || size || 0),item.id]);
+    job.media_completed_bytes = Number(job.media_completed_bytes || 0) + Number(verifiedBytes || size || 0);
+    return true;
+  } catch (error) {
+    await query(`UPDATE platform_transfer_media_items SET status='failed',last_error=$1,updated_at=NOW() WHERE id=$2`, [
+      String(error?.message || 'Media copy failed').slice(0,1000),item.id,
+    ]).catch(() => undefined);
+    return false;
+  }
 }
 
 function rewriteMedia(value, replacements) {
