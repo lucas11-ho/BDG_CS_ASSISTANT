@@ -694,40 +694,148 @@ async function importManifest(query, manifest, scope) {
   return { result,rollback };
 }
 
+async function processPlatformTransferMediaBatch({ env, query, withTransaction, scope, admin, jobId, audit }) {
+  const job = (await query(`SELECT j.*,source.name AS source_platform_name,target.name AS target_platform_name
+    FROM platform_transfer_jobs j
+    JOIN saas_platforms source ON source.id=j.source_platform_id
+    JOIN saas_platforms target ON target.id=j.target_platform_id
+    WHERE j.public_id=$1::uuid AND j.target_platform_id=$2 LIMIT 1`, [jobId,scope.platform_id])).rows[0];
+  if (!job) fail('Transfer job was not found',404,'TRANSFER_JOB_NOT_FOUND');
+  if (job.status === 'completed' || job.status === 'rolled_back') return { ok:true,job:publicJob(job) };
+  if (job.status !== 'running') fail('Media copy is not ready to continue',409,'TRANSFER_MEDIA_NOT_READY');
+  if (Number(job.media_total_files || 0) > 0 && !env.GUIDE_IMAGES) {
+    await query(`UPDATE platform_transfer_jobs SET status='failed',error_code='TRANSFER_MEDIA_STORAGE_NOT_CONFIGURED',
+      error_message='Platform media storage is not configured',updated_at=NOW() WHERE id=$1`, [job.id]);
+    fail('Platform media storage is not configured',503,'TRANSFER_MEDIA_STORAGE_NOT_CONFIGURED');
+  }
+
+  await resetStaleMediaClaims(query,job.id);
+  const started = Date.now();
+  let processed = 0;
+  while (processed < MEDIA_BATCH_SIZE && (processed === 0 || Date.now() - started < MEDIA_BATCH_BUDGET_MS)) {
+    const item = await claimNextMediaItem(withTransaction,job.id);
+    if (!item) break;
+    await copyQueuedMediaItem(env,query,job,item);
+    processed += 1;
+  }
+
+  const synced = await syncMediaJob(query,job.id);
+  const output = { ...synced,source_platform_name:job.source_platform_name,target_platform_name:job.target_platform_name };
+  if (synced.status === 'completed') {
+    await audit('apply','platform_transfer_jobs',jobId,`Platform transfer completed with ${synced.media_completed_files || 0} verified media file(s)`,scope);
+  } else if (synced.status === 'failed') {
+    await audit('update','platform_transfer_jobs',jobId,`Platform transfer media requires attention: ${synced.media_failed_files || 0} failed file(s)`,scope);
+  }
+  return { ok:true,job:publicJob(output),batch:{ processed } };
+}
+
 export async function applyPlatformTransfer({ env, query, withTransaction, scope, admin, jobId, confirmation, audit }) {
   if (String(confirmation || '').trim() !== String(scope.platform_name || '').trim()) fail('Type the destination platform name to confirm',400,'TRANSFER_DESTINATION_CONFIRMATION_REQUIRED');
-  const claimed = (await query(`SELECT j.*,g.manifest_ciphertext,g.manifest_checksum,g.status AS grant_status FROM platform_transfer_jobs j JOIN platform_transfer_grants g ON g.id=j.grant_id WHERE j.public_id=$1::uuid AND j.target_platform_id=$2 LIMIT 1`, [jobId,scope.platform_id])).rows[0];
-  if (!claimed) fail('Transfer preview was not found', 404, 'TRANSFER_JOB_NOT_FOUND');
-  if (claimed.status !== 'preview' || claimed.grant_status !== 'claimed') fail('Transfer has already been applied or is unavailable', 409, 'TRANSFER_JOB_NOT_READY');
-  const manifest = await decryptManifest(env, claimed.manifest_ciphertext, claimed.manifest_checksum);
-  const media = await copyOwnedMedia(env, manifest, scope, jobId);
-  const rewritten = rewriteMedia(manifest,media.replacements);
+  const claimed = (await query(`SELECT j.*,g.manifest_ciphertext,g.manifest_checksum,g.status AS grant_status
+    FROM platform_transfer_jobs j
+    JOIN platform_transfer_grants g ON g.id=j.grant_id
+    WHERE j.public_id=$1::uuid AND j.target_platform_id=$2 LIMIT 1`, [jobId,scope.platform_id])).rows[0];
+  if (!claimed) fail('Transfer preview was not found',404,'TRANSFER_JOB_NOT_FOUND');
+  if (claimed.status !== 'preview' || claimed.grant_status !== 'claimed') fail('Transfer has already been applied or is unavailable',409,'TRANSFER_JOB_NOT_READY');
+
+  const manifest = await decryptManifest(env,claimed.manifest_ciphertext,claimed.manifest_checksum);
+  const sourceMediaKeys = collectOwnedMediaKeys(manifest,manifest.source);
+  if (sourceMediaKeys.length > MAX_MEDIA_FILES) {
+    fail(`Transfer contains ${sourceMediaKeys.length} media files; the large-library limit is ${MAX_MEDIA_FILES}`,413,'TRANSFER_MEDIA_LIMIT');
+  }
+  if (sourceMediaKeys.length > 0 && !env.GUIDE_IMAGES) fail('Platform media storage is not configured',503,'TRANSFER_MEDIA_STORAGE_NOT_CONFIGURED');
+
   try {
-    const completed = await withTransaction(async (tx) => {
+    const importedJob = await withTransaction(async (tx) => {
       const locked = (await tx(`SELECT status FROM platform_transfer_jobs WHERE id=$1 FOR UPDATE`, [claimed.id])).rows[0];
-      if (locked?.status !== 'preview') fail('Transfer is no longer ready', 409, 'TRANSFER_JOB_NOT_READY');
-      await tx(`UPDATE platform_transfer_jobs SET status='running',started_at=NOW(),applied_by=$1,updated_at=NOW() WHERE id=$2`, [admin.email,claimed.id]);
+      if (locked?.status !== 'preview') fail('Transfer is no longer ready',409,'TRANSFER_JOB_NOT_READY');
+
+      await tx(`UPDATE platform_transfer_jobs SET status='running',started_at=COALESCE(started_at,NOW()),
+        applied_by=$1,error_code=NULL,error_message=NULL,updated_at=NOW() WHERE id=$2`, [admin.email,claimed.id]);
+
+      const media = await prepareMediaQueue(tx,manifest,scope,claimed.id,jobId);
+      const rewritten = rewriteMedia(manifest,media.replacements);
       const imported = await importManifest(tx,rewritten,scope);
-      imported.rollback.copied_media = media.copied;
-      imported.result.media_files = media.copied.length;
-      imported.result.media_bytes = Number(media.total_bytes || 0);
-      const row = (await tx(`UPDATE platform_transfer_jobs SET status='completed',result_json=$1::jsonb,rollback_json=$2::jsonb,rollback_expires_at=NOW()+INTERVAL '${ROLLBACK_DAYS} days',completed_at=NOW(),updated_at=NOW() WHERE id=$3 RETURNING *`, [JSON.stringify(imported.result),JSON.stringify(imported.rollback),claimed.id])).rows[0];
-      await tx(`UPDATE platform_transfer_grants
-        SET status='completed',completed_at=NOW(),manifest_ciphertext='',manifest_checksum='',manifest_purged_at=NOW(),updated_at=NOW()
-        WHERE id=$1`, [claimed.grant_id]);
+      imported.result.data_imported = true;
+      imported.result.media_files = media.total_files;
+      imported.result.media_bytes = 0;
+      imported.result.media = {
+        total_files:media.total_files,
+        completed_files:0,
+        failed_files:0,
+        completed_bytes:0,
+      };
+
+      const nextStatus = media.total_files ? 'running' : 'completed';
+      const row = (await tx(`UPDATE platform_transfer_jobs SET
+        status=$1,
+        result_json=$2::jsonb,
+        rollback_json=$3::jsonb,
+        rollback_expires_at=NOW()+INTERVAL '${ROLLBACK_DAYS} days',
+        data_imported_at=NOW(),
+        media_total_files=$4,
+        media_completed_files=0,
+        media_failed_files=0,
+        media_total_bytes=0,
+        media_completed_bytes=0,
+        media_batch_size=$5,
+        media_last_progress_at=NOW(),
+        completed_at=CASE WHEN $1='completed' THEN NOW() ELSE NULL END,
+        updated_at=NOW()
+        WHERE id=$6 RETURNING *`, [
+          nextStatus,JSON.stringify(imported.result),JSON.stringify(imported.rollback),
+          media.total_files,MEDIA_BATCH_SIZE,claimed.id,
+        ])).rows[0];
+
+      await tx(`UPDATE platform_transfer_grants SET
+        manifest_ciphertext='',manifest_checksum='',manifest_purged_at=NOW(),
+        status=CASE WHEN $1='completed' THEN 'completed' ELSE status END,
+        completed_at=CASE WHEN $1='completed' THEN NOW() ELSE completed_at END,
+        updated_at=NOW()
+        WHERE id=$2`, [nextStatus,claimed.grant_id]);
       return row;
     });
-    await audit('apply','platform_transfer_jobs',jobId,`Platform transfer completed: ${completed.result_json?.created || 0} created, ${completed.result_json?.skipped || 0} skipped`,scope);
-    return { ok:true, job:publicJob(completed) };
+
+    await audit('apply','platform_transfer_jobs',jobId,`Platform data imported: ${importedJob.result_json?.created || 0} created, ${importedJob.result_json?.skipped || 0} skipped; media queued: ${importedJob.media_total_files || 0}`,scope);
+
+    if (importedJob.status === 'completed') {
+      return { ok:true,job:publicJob(importedJob) };
+    }
+    return processPlatformTransferMediaBatch({ env,query,withTransaction,scope,admin,jobId,audit });
   } catch (error) {
-    await query(`UPDATE platform_transfer_jobs SET status='failed',error_code=$1,error_message=$2,updated_at=NOW() WHERE id=$3 AND status IN ('preview','running')`, [String(error?.code || 'TRANSFER_APPLY_FAILED'),String(error?.message || 'Transfer failed').slice(0,1000),claimed.id]).catch(() => undefined);
-    await query(`UPDATE platform_transfer_grants
-      SET status='revoked',revoked_at=NOW(),manifest_ciphertext='',manifest_checksum='',manifest_purged_at=NOW(),updated_at=NOW()
-      WHERE id=$1 AND status='claimed'`, [claimed.grant_id]).catch(() => undefined);
-    if (env.GUIDE_IMAGES?.delete) await Promise.allSettled(media.copied.map((key) => env.GUIDE_IMAGES.delete(key)));
+    const current = (await query(`SELECT status,data_imported_at FROM platform_transfer_jobs WHERE id=$1 LIMIT 1`, [claimed.id]).catch(() => ({ rows:[] }))).rows?.[0];
+    if (!current?.data_imported_at) {
+      await query(`UPDATE platform_transfer_jobs SET status='failed',error_code=$1,error_message=$2,updated_at=NOW()
+        WHERE id=$3 AND status IN ('preview','running')`, [
+        String(error?.code || 'TRANSFER_APPLY_FAILED'),String(error?.message || 'Transfer failed').slice(0,1000),claimed.id,
+      ]).catch(() => undefined);
+      await query(`UPDATE platform_transfer_grants SET status='revoked',revoked_at=NOW(),
+        manifest_ciphertext='',manifest_checksum='',manifest_purged_at=NOW(),updated_at=NOW()
+        WHERE id=$1 AND status='claimed'`, [claimed.grant_id]).catch(() => undefined);
+    }
     throw error;
   }
 }
+
+export async function continuePlatformTransferMedia(deps) {
+  return processPlatformTransferMediaBatch(deps);
+}
+
+export async function retryPlatformTransferMedia({ env, query, withTransaction, scope, admin, jobId, audit }) {
+  const job = (await query(`SELECT * FROM platform_transfer_jobs
+    WHERE public_id=$1::uuid AND target_platform_id=$2 LIMIT 1`, [jobId,scope.platform_id])).rows[0];
+  if (!job) fail('Transfer job was not found',404,'TRANSFER_JOB_NOT_FOUND');
+  if (!job.data_imported_at) fail('Transfer data has not been imported yet',409,'TRANSFER_MEDIA_NOT_READY');
+  if (!['failed','running'].includes(String(job.status))) fail('This transfer does not have failed media to retry',409,'TRANSFER_MEDIA_NOT_RETRYABLE');
+
+  await query(`UPDATE platform_transfer_media_items SET status='pending',attempts=0,last_error=NULL,updated_at=NOW()
+    WHERE job_id=$1 AND status='failed'`, [job.id]);
+  await query(`UPDATE platform_transfer_jobs SET status='running',error_code=NULL,error_message=NULL,updated_at=NOW()
+    WHERE id=$1`, [job.id]);
+  await audit('update','platform_transfer_jobs',jobId,'Retrying failed platform-transfer media files',scope);
+  return processPlatformTransferMediaBatch({ env,query,withTransaction,scope,admin,jobId,audit });
+}
+
 
 const ROLLBACK_ORDER = ['guide_translations','guide_media_assets','guides','faqs','ai_content_items','categories','platform_locales','popular_help_cards','chat_quick_replies','ai_prompt_sections','site_content_blocks','navigation_items','guide_home_sections','theme_settings','guide_theme_settings','chat_theme_settings','ai_reliability_settings','ai_source_router_settings'];
 
