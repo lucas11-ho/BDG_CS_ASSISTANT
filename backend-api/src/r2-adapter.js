@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 
 async function toNodeBody(body) {
   if (body == null) return Buffer.alloc(0);
@@ -55,6 +55,20 @@ export function createR2Adapter(env, options = {}) {
           contentLength: Number(result.ContentLength),
           contentRange: result.ContentRange || '',
           acceptRanges: result.AcceptRanges || 'bytes',
+        };
+      } catch (error) {
+        const status = error?.$metadata?.httpStatusCode;
+        if (status === 404 || error?.name === 'NoSuchKey' || error?.name === 'NotFound') return null;
+        throw error;
+      }
+    },
+    async head(key) {
+      try {
+        const result = await client.send(new HeadObjectCommand({ Bucket: env.R2_BUCKET_NAME, Key: key }));
+        return {
+          httpMetadata: { contentType: result.ContentType || 'application/octet-stream' },
+          etag: result.ETag,
+          contentLength: Number(result.ContentLength),
         };
       } catch (error) {
         const status = error?.$metadata?.httpStatusCode;
