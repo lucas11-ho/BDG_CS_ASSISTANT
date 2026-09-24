@@ -858,7 +858,7 @@ export async function rollbackPlatformTransfer({ env, query, withTransaction, sc
     return (await tx(`UPDATE platform_transfer_jobs SET status='rolled_back',rolled_back_by=$1,rolled_back_at=NOW(),updated_at=NOW() WHERE id=$2 RETURNING *`, [admin.email,job.id])).rows[0];
   });
   const queuedMedia = (await query(`SELECT target_key FROM platform_transfer_media_items
-    WHERE job_id=$1 AND status='completed'`, [job.id])).rows.map((row) => row.target_key);
+    WHERE job_id=$1`, [job.id])).rows.map((row) => row.target_key);
   const copiedMedia = [...new Set([...(rollback.copied_media || []),...queuedMedia].filter(Boolean))];
   if (env.GUIDE_IMAGES?.delete) await Promise.allSettled(copiedMedia.map((key) => env.GUIDE_IMAGES.delete(key)));
   await audit('rollback','platform_transfer_jobs',jobId,'Platform transfer rolled back within the seven-day recovery window',scope);
