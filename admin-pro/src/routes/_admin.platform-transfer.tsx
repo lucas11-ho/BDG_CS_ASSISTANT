@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -11,6 +11,7 @@ import {
   Form,
   Input,
   Modal,
+  Progress,
   Result,
   Row,
   Space,
@@ -76,6 +77,17 @@ const MODULES = [
 ] as const;
 
 type TransferCounts = { create: number; skip: number; replace: number; total: number };
+type MediaProgress = {
+  total_files?: number;
+  completed_files?: number;
+  failed_files?: number;
+  pending_files?: number;
+  total_bytes?: number;
+  completed_bytes?: number;
+  percent?: number;
+  batch_size?: number;
+  last_progress_at?: string;
+};
 type TransferJob = {
   id: string;
   status: string;
@@ -84,8 +96,13 @@ type TransferJob = {
   source_platform_name?: string;
   target_platform_name?: string;
   preview?: { totals?: TransferCounts; modules?: Record<string, TransferCounts> };
-  result?: { created?: number; skipped?: number; replaced?: number };
+  result?: { created?: number; skipped?: number; replaced?: number; media_files?: number; media_bytes?: number; data_imported?: boolean };
+  media_progress?: MediaProgress;
+  data_imported_at?: string;
   rollback_available?: boolean;
+  rollback_expires_at?: string;
+  error_code?: string;
+  error_message?: string;
   created_at?: string;
 };
 type TransferGrant = {
@@ -113,6 +130,14 @@ function errorDetails(error: unknown) {
   return error && typeof error === "object" ? (error as Record<string, unknown>) : {};
 }
 
+function formatBytes(value: number | undefined) {
+  const bytes = Math.max(0, Number(value || 0));
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 function statusColor(status: string) {
   if (status === "completed") return "success";
   if (status === "rolled_back" || status === "revoked" || status === "expired") return "default";
@@ -128,6 +153,8 @@ function PlatformTransferPage() {
   const [generated, setGenerated] = useState<GeneratedTransfer | null>(null);
   const [preview, setPreview] = useState<TransferPreview | null>(null);
   const [rollbackJob, setRollbackJob] = useState<TransferJob | null>(null);
+  const [pumpingJobId, setPumpingJobId] = useState("");
+  const mediaPumpRef = useRef(new Set<string>());
   const [generateForm] = Form.useForm<{ modules: string[]; twofa_code: string }>();
   const [claimForm] = Form.useForm<{ secret: string }>();
   const [applyForm] = Form.useForm<{ confirmation: string; twofa_code: string }>();
@@ -148,6 +175,59 @@ function PlatformTransferPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const mergeJob = useCallback((job: TransferJob) => {
+    setState((current) => ({
+      ...current,
+      jobs: (current.jobs || []).map((row) => row.id === job.id ? { ...row, ...job } : row),
+    }));
+    setPreview((current) => current?.job?.id === job.id ? { ...current, job:{ ...current.job, ...job } } : current);
+  }, []);
+
+  const pumpMedia = useCallback(async (jobId: string) => {
+    if (!jobId || mediaPumpRef.current.has(jobId)) return;
+    mediaPumpRef.current.add(jobId);
+    setPumpingJobId(jobId);
+    try {
+      for (let batch = 0; batch < 2000; batch += 1) {
+        const result: any = await api.continuePlatformTransferMedia(jobId);
+        const job = result?.job as TransferJob;
+        if (!job) break;
+        mergeJob(job);
+        if (job.status !== "running") {
+          if (job.status === "completed") message.success(t("Platform transfer completed with all media verified"));
+          if (job.status === "failed") message.warning(t("Some media files still need attention. Use Retry failed media."));
+          break;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
+    } catch (error: unknown) {
+      message.error(String(errorDetails(error).message || t("Media copy paused. You can resume it from Transfer history.")));
+    } finally {
+      mediaPumpRef.current.delete(jobId);
+      setPumpingJobId((current) => current === jobId ? "" : current);
+      await load();
+    }
+  }, [load, mergeJob, t]);
+
+  const retryMedia = useCallback(async (jobId: string) => {
+    if (!jobId || mediaPumpRef.current.has(jobId)) return;
+    try {
+      setPumpingJobId(jobId);
+      const result: any = await api.retryPlatformTransferMedia(jobId);
+      if (result?.job) mergeJob(result.job);
+      if (result?.job?.status === "running") {
+        setPumpingJobId("");
+        void pumpMedia(jobId);
+      } else {
+        setPumpingJobId("");
+        await load();
+      }
+    } catch (error: unknown) {
+      setPumpingJobId("");
+      message.error(String(errorDetails(error).message || t("Failed media could not be retried")));
+    }
+  }, [load, mergeJob, pumpMedia, t]);
 
   const createGrant = async () => {
     try {
@@ -195,7 +275,12 @@ function PlatformTransferPage() {
       );
       setPreview({ ...preview, job: result.job });
       applyForm.resetFields();
-      message.success(t("Platform data copied successfully"));
+      if (result.job?.status === "running") {
+        message.success(t("Platform data imported. Media is copying in resumable batches."));
+        void pumpMedia(result.job.id);
+      } else {
+        message.success(t("Platform data copied successfully"));
+      }
       await load();
     } catch (error: unknown) {
       const details = errorDetails(error);
