@@ -229,6 +229,11 @@ function PlatformTransferPage() {
     }
   }, [load, mergeJob, pumpMedia, t]);
 
+  useEffect(() => {
+    const running = (state.jobs || []).find((job) => job.status === "running" && job.data_imported_at);
+    if (running && !mediaPumpRef.current.has(running.id)) void pumpMedia(running.id);
+  }, [state.jobs, pumpMedia]);
+
   const createGrant = async () => {
     try {
       const values = await generateForm.validateFields();
