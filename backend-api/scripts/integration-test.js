@@ -435,6 +435,54 @@ try {
   const isolatedFaqs = expectStatus(await call('/admin/faqs', { platformRoute:isolatedPlatform.public_route_key }), 200, 'Read isolated platform FAQs');
   assert.equal(isolatedFaqs.some((row) => Number(row.id) === Number(createdFaq.id)), false, 'Platform-scoped API must not leak FAQ rows');
 
+  const transferMediaObjects = new Map();
+  env.GUIDE_IMAGES = {
+    async put(key, body, options = {}) {
+      const bytes = body instanceof Uint8Array || Buffer.isBuffer(body)
+        ? Buffer.from(body)
+        : Buffer.from(await new Response(body).arrayBuffer());
+      transferMediaObjects.set(String(key), {
+        bytes,
+        contentType:options.httpMetadata?.contentType || 'application/octet-stream',
+      });
+      return { key };
+    },
+    async get(key) {
+      const stored = transferMediaObjects.get(String(key));
+      if (!stored) return null;
+      return {
+        body:new Uint8Array(stored.bytes),
+        httpMetadata:{ contentType:stored.contentType },
+        contentLength:stored.bytes.byteLength,
+      };
+    },
+    async head(key) {
+      const stored = transferMediaObjects.get(String(key));
+      if (!stored) return null;
+      return {
+        httpMetadata:{ contentType:stored.contentType },
+        contentLength:stored.bytes.byteLength,
+      };
+    },
+    async delete(key) {
+      transferMediaObjects.delete(String(key));
+      return true;
+    },
+  };
+  const sourceTransferMediaKeys = [];
+  for (let index = 0; index < 30; index += 1) {
+    const key = `tenant-${platform.tenant_id}/platform-${platform.id}/guide-transfer-test/media-${String(index + 1).padStart(2,'0')}.png`;
+    const bytes = Buffer.from(`integration-transfer-media-${index + 1}`);
+    sourceTransferMediaKeys.push(key);
+    transferMediaObjects.set(key,{ bytes,contentType:'image/png' });
+    await database.query(`INSERT INTO guide_media_assets(
+      tenant_id,platform_id,storage_key,public_url,original_name,content_type,size_bytes,status,media_kind
+    ) VALUES($1,$2,$3,$4,$5,'image/png',$6,'active','image')
+    ON CONFLICT(platform_id,storage_key) DO UPDATE SET public_url=EXCLUDED.public_url,size_bytes=EXCLUDED.size_bytes,status='active'`, [
+      platform.tenant_id,platform.id,key,`https://api.example.test/uploads/${key}`,`media-${index + 1}.png`,bytes.byteLength,
+    ]);
+  }
+
   await database.query('UPDATE admin_users SET twofa_last_counter=NULL,twofa_failed_attempts=0,twofa_locked_until=NULL WHERE lower(email)=lower($1)', [env.ADMIN_EMAIL]);
   const transferGrant = expectStatus(await call('/admin/platform-transfers/grants', {
     method:'POST',
@@ -465,8 +513,34 @@ try {
     platformRoute:isolatedPlatform.public_route_key,
     body:{ confirmation:'Integration Isolated',twofa_code:await currentTotp(ownerSecret) },
   }), 200, 'Destination owner applies the previewed transfer with typed confirmation and fresh 2FA');
-  assert.equal(appliedTransfer.job.status,'completed');
+  assert.equal(appliedTransfer.job.status,'running','First apply request must stop after one bounded media batch');
+  assert.ok(appliedTransfer.job.data_imported_at,'Database import must commit before resumable media copying continues');
+  assert.equal(Number(appliedTransfer.job.media_progress.total_files),30);
+  assert.equal(Number(appliedTransfer.job.media_progress.completed_files),25);
   assert.ok(Number(appliedTransfer.job.result.created) > 0);
+
+  const completedTransfer = expectStatus(await call(`/admin/platform-transfers/jobs/${claimedTransfer.job.id}/media/continue`, {
+    method:'POST',
+    platformRoute:isolatedPlatform.public_route_key,
+    body:{},
+  }), 200, 'Destination owner resumes the bounded media queue without replaying the transfer key');
+  assert.equal(completedTransfer.job.status,'completed');
+  assert.equal(Number(completedTransfer.job.media_progress.completed_files),30);
+  assert.equal(Number(completedTransfer.job.media_progress.failed_files),0);
+  assert.equal(Number(completedTransfer.job.media_progress.percent),100);
+  const copiedMediaRows = (await database.query(`SELECT storage_key,size_bytes FROM guide_media_assets
+    WHERE platform_id=(SELECT id FROM saas_platforms WHERE public_route_key=$1)
+      AND storage_key LIKE $2 ORDER BY id`, [
+    isolatedPlatform.public_route_key,
+    `tenant-%/platform-%/transfer-${claimedTransfer.job.id}/%`,
+  ])).rows;
+  assert.equal(copiedMediaRows.length,30,'All Guide media asset rows must be re-owned by the destination platform');
+  for (const row of copiedMediaRows) {
+    const stored = transferMediaObjects.get(row.storage_key);
+    assert.ok(stored,`Destination object must exist for ${row.storage_key}`);
+    assert.equal(Number(row.size_bytes),stored.bytes.byteLength);
+  }
+  for (const key of sourceTransferMediaKeys) assert.ok(transferMediaObjects.has(key),'Source media must remain unchanged');
   const copiedFaq = (await database.query(`SELECT id,status FROM faqs WHERE platform_id=(SELECT id FROM saas_platforms WHERE public_route_key=$1) AND question='Integration duplicate intent' AND deleted_at IS NULL`, [isolatedPlatform.public_route_key])).rows[0];
   assert.ok(copiedFaq);
   assert.equal(copiedFaq.status,'draft','Transferred FAQ must require destination review before publication');
@@ -487,6 +561,8 @@ try {
   }), 200, 'Destination owner rolls back within the seven-day recovery window');
   assert.equal(rolledBackTransfer.job.status,'rolled_back');
   assert.equal(Number((await database.query(`SELECT COUNT(*)::int AS count FROM faqs WHERE platform_id=(SELECT id FROM saas_platforms WHERE public_route_key=$1) AND question='Integration duplicate intent' AND deleted_at IS NULL`, [isolatedPlatform.public_route_key])).rows[0].count),0);
+  for (const row of copiedMediaRows) assert.equal(transferMediaObjects.has(row.storage_key),false,'Rollback must delete destination media objects');
+  for (const key of sourceTransferMediaKeys) assert.ok(transferMediaObjects.has(key),'Rollback must never delete source media');
 
   const callsBeforeGreeting = providerRequestKinds.length;
   const promptGreeting = await submitAndCompleteChat({ message:'halo', language:'id', platform_key:platform.public_route_key, session_id:'integration-prompt-greeting' }, 'Queue and complete an Indonesian greeting through the active Prompt Manager runtime');
