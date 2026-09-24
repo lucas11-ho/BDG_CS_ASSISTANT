@@ -513,7 +513,7 @@ async function mediaProgress(query, jobDbId) {
   const stats = (await query(`SELECT
       COUNT(*)::int AS total_files,
       COUNT(*) FILTER (WHERE status='completed')::int AS completed_files,
-      COUNT(*) FILTER (WHERE status='failed')::int AS failed_files,
+      COUNT(*) FILTER (WHERE status='failed' AND attempts >= $2)::int AS failed_files,
       COUNT(*) FILTER (WHERE status='pending' OR (status='failed' AND attempts < $2))::int AS retryable_files,
       COUNT(*) FILTER (WHERE status='copying')::int AS copying_files,
       COALESCE(SUM(size_bytes),0)::bigint AS total_bytes,
