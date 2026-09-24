@@ -91,6 +91,7 @@ jobs:
           npm run test:v1253-public-media
           npm run test:v1254-domain-guide
           npm run test:v1260-ai-writer
+          npm run test:v1270-transfer
           npm run test:chat-reliability
           npm run test:security
           npm run test:structured

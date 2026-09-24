@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 
 async function toNodeBody(body) {
   if (body == null) return Buffer.alloc(0);
@@ -27,9 +27,14 @@ export function createR2Adapter(env, options = {}) {
   return {
     supportsHttpRange: true,
     async put(key, body, options = {}) {
-      const payload = await toNodeBody(body);
-      const contentLength = Number.isFinite(Number(options.contentLength))
-        ? Number(options.contentLength)
+      const declaredLength = Number(options.contentLength);
+      const canStream = Number.isFinite(declaredLength)
+        && (body instanceof ReadableStream || body instanceof Readable);
+      const payload = canStream
+        ? (body instanceof ReadableStream ? Readable.fromWeb(body) : body)
+        : await toNodeBody(body);
+      const contentLength = Number.isFinite(declaredLength)
+        ? declaredLength
         : typeof payload === 'string' ? Buffer.byteLength(payload) : Number(payload?.byteLength ?? payload?.length);
       await client.send(new PutObjectCommand({
         Bucket: env.R2_BUCKET_NAME,
@@ -55,6 +60,20 @@ export function createR2Adapter(env, options = {}) {
           contentLength: Number(result.ContentLength),
           contentRange: result.ContentRange || '',
           acceptRanges: result.AcceptRanges || 'bytes',
+        };
+      } catch (error) {
+        const status = error?.$metadata?.httpStatusCode;
+        if (status === 404 || error?.name === 'NoSuchKey' || error?.name === 'NotFound') return null;
+        throw error;
+      }
+    },
+    async head(key) {
+      try {
+        const result = await client.send(new HeadObjectCommand({ Bucket: env.R2_BUCKET_NAME, Key: key }));
+        return {
+          httpMetadata: { contentType: result.ContentType || 'application/octet-stream' },
+          etag: result.ETag,
+          contentLength: Number(result.ContentLength),
         };
       } catch (error) {
         const status = error?.$metadata?.httpStatusCode;

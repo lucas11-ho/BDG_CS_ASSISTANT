@@ -577,6 +577,31 @@ export const PHRASES: readonly Phrase[] = [
   ["AI Writer content inserted", "AI 内容已插入", "AI အကြောင်းအရာ ထည့်ပြီးပါပြီ"],
   ["Tell AI what you want it to write or change", "告诉 AI 你希望它撰写或修改什么", "AI ကို ဘာရေးစေချင်သလဲ သို့မဟုတ် ဘာပြောင်းစေချင်သလဲ ပြောပါ"],
 
+  ["Transfer progress", "迁移进度", "ကူးပြောင်းမှု အခြေအနေ"],
+  ["Guide media", "指南媒体", "Guide မီဒီယာ"],
+  ["Verified", "已验证", "အတည်ပြုပြီး"],
+  ["Database records imported; Guide media is copying", "数据库记录已导入，正在复制指南媒体", "Database မှတ်တမ်းများ ထည့်သွင်းပြီး၊ Guide မီဒီယာကို ကူးယူနေသည်"],
+  ["The imported records are already saved as drafts. Media is copied and verified in resumable batches, so refreshing this page does not restart the transfer.", "已导入的记录已保存为草稿。媒体将分批复制并验证，刷新页面不会重新开始迁移。", "ထည့်သွင်းထားသော မှတ်တမ်းများကို Draft အဖြစ် သိမ်းထားပြီးဖြစ်သည်။ မီဒီယာကို ပြန်ဆက်နိုင်သော batch များဖြင့် ကူးယူစစ်ဆေးသဖြင့် စာမျက်နှာ Refresh လုပ်လည်း အစမှ ပြန်မစပါ။"],
+  ["Copying Guide media", "正在复制指南媒体", "Guide မီဒီယာ ကူးယူနေသည်"],
+  ["Verified files", "已验证文件", "အတည်ပြုပြီး ဖိုင်များ"],
+  ["Pending", "待处理", "စောင့်ဆိုင်းနေသည်"],
+  ["Verified media", "已验证媒体", "အတည်ပြုပြီး မီဒီယာ"],
+  ["Copying media…", "正在复制媒体…", "မီဒီယာ ကူးယူနေသည်…"],
+  ["Resume media copy", "继续复制媒体", "မီဒီယာ ကူးယူမှု ဆက်လုပ်မည်"],
+  ["You can leave this page and resume later from Transfer history.", "您可以离开此页面，稍后从迁移历史中继续。", "ဤစာမျက်နှာမှ ထွက်နိုင်ပြီး နောက်မှ Transfer history မှ ဆက်လုပ်နိုင်သည်။"],
+  ["Platform data imported, but some media still needs attention", "平台数据已导入，但部分媒体仍需处理", "Platform ဒေတာ ထည့်သွင်းပြီးသော်လည်း မီဒီယာအချို့ကို ဆက်လက်ဖြေရှင်းရန် လိုသည်"],
+  ["Retry the failed media files. Successfully verified files will not be copied again.", "重试失败的媒体文件。已成功验证的文件不会重复复制。", "မအောင်မြင်သော မီဒီယာဖိုင်များကို ပြန်စမ်းပါ။ အတည်ပြုပြီးသားဖိုင်များကို ထပ်မကူးပါ။"],
+  ["Retry failed media", "重试失败媒体", "မအောင်မြင်သော မီဒီယာကို ပြန်စမ်းမည်"],
+  ["Applying the transfer first imports the selected records as drafts, then copies and verifies owned media in resumable batches. The source platform is never changed.", "应用迁移时会先将所选记录作为草稿导入，然后分批复制并验证平台自有媒体。源平台不会被修改。", "Transfer လုပ်ရာတွင် ရွေးထားသော မှတ်တမ်းများကို Draft အဖြစ် အရင်ထည့်သွင်းပြီးနောက် ပိုင်ဆိုင်သော မီဒီယာကို ပြန်ဆက်နိုင်သည့် batch များဖြင့် ကူးယူစစ်ဆေးမည်။ မူလ Platform ကို မပြောင်းလဲပါ။"],
+  ["Open progress", "查看进度", "အခြေအနေ ဖွင့်ကြည့်မည်"],
+  ["Platform data imported. Media is copying in resumable batches.", "平台数据已导入，媒体正在以可恢复批次复制。", "Platform ဒေတာ ထည့်သွင်းပြီးပါပြီ။ မီဒီယာကို ပြန်ဆက်နိုင်သော batch များဖြင့် ကူးယူနေသည်။"],
+  ["Platform transfer completed with all media verified", "平台迁移完成，所有媒体均已验证", "Platform ကူးပြောင်းမှု ပြီးစီးပြီး မီဒီယာအားလုံး အတည်ပြုပြီး"],
+  ["Some media files still need attention. Use Retry failed media.", "部分媒体文件仍需处理，请使用“重试失败媒体”。", "မီဒီယာဖိုင်အချို့ကို ဆက်လက်ဖြေရှင်းရန် လိုသည်။ Retry failed media ကို အသုံးပြုပါ။"],
+  ["Media copy paused. You can resume it from Transfer history.", "媒体复制已暂停，可从迁移历史中继续。", "မီဒီယာ ကူးယူမှု ရပ်ထားသည်။ Transfer history မှ ပြန်ဆက်နိုင်သည်။"],
+  ["Failed media could not be retried", "无法重试失败媒体", "မအောင်မြင်သော မီဒီယာကို ပြန်စမ်း၍ မရပါ"],
+  ["Data is copied from the old platform; the source is never changed. Transfer keys expire after 30 minutes and work once. Large Guide libraries use a resumable verified media queue instead of one oversized request.", "数据从旧平台复制，源平台不会被修改。迁移密钥30分钟后过期且只能使用一次。大型指南库使用可恢复、可验证的媒体队列，而不是单个超大请求。", "ဒေတာကို Platform အဟောင်းမှ ကူးယူပြီး မူလ Platform ကို မပြောင်းလဲပါ။ Transfer key သည် မိနစ် 30 အတွင်း သက်တမ်းကုန်ပြီး တစ်ကြိမ်သာ အသုံးပြုနိုင်သည်။ Guide library ကြီးများအတွက် တစ်ခါတည်း Request ကြီးမဟုတ်ဘဲ ပြန်ဆက်နိုင်ပြီး စစ်ဆေးနိုင်သော မီဒီယာ queue ကို အသုံးပြုသည်။"],
+
+
 ];
 
 const indexForLocale = (locale: AdminLocale) => locale === "zh-CN" ? 1 : locale === "my-MM" ? 2 : 0;

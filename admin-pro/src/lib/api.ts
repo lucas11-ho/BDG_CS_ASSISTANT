@@ -849,8 +849,16 @@ export const api = {
     return request("/admin/platform-transfers/claim", { method:"POST",body:JSON.stringify({ secret }) });
   },
   applyPlatformTransfer: async (jobId: string, confirmation: string, twofa_code: string) => {
-    if (MOCK_MODE) return delay({ ok:true,job:{ id:jobId,status:"completed",result:{ created:4,skipped:1,replaced:2 } } });
+    if (MOCK_MODE) return delay({ ok:true,job:{ id:jobId,status:"running",result:{ created:4,skipped:1,replaced:2 },media_progress:{ total_files:24,completed_files:5,failed_files:0,pending_files:19,percent:21 } } });
     return request(`/admin/platform-transfers/jobs/${encodeURIComponent(jobId)}/apply`, { method:"POST",body:JSON.stringify({ confirmation,twofa_code }) });
+  },
+  continuePlatformTransferMedia: async (jobId: string) => {
+    if (MOCK_MODE) return delay({ ok:true,job:{ id:jobId,status:"running",media_progress:{ total_files:24,completed_files:15,failed_files:0,pending_files:9,percent:63 } } });
+    return request(`/admin/platform-transfers/jobs/${encodeURIComponent(jobId)}/media/continue`, { method:"POST",body:JSON.stringify({}) });
+  },
+  retryPlatformTransferMedia: async (jobId: string) => {
+    if (MOCK_MODE) return delay({ ok:true,job:{ id:jobId,status:"running",media_progress:{ total_files:24,completed_files:20,failed_files:0,pending_files:4,percent:83 } } });
+    return request(`/admin/platform-transfers/jobs/${encodeURIComponent(jobId)}/media/retry`, { method:"POST",body:JSON.stringify({}) });
   },
   rollbackPlatformTransfer: async (jobId: string, confirmation: string, twofa_code: string) => {
     if (MOCK_MODE) return delay({ ok:true,job:{ id:jobId,status:"rolled_back" } });
