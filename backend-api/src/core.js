@@ -17,6 +17,8 @@ import {
   revokePlatformTransferGrant,
   claimPlatformTransfer,
   applyPlatformTransfer,
+  continuePlatformTransferMedia,
+  retryPlatformTransferMedia,
   rollbackPlatformTransfer,
   getPlatformTransferJob,
 } from './platform-transfer.js';
@@ -281,6 +283,12 @@ async function route(request, env, url) {
       const payload = await readJson(request);
       await requirePlatformTransferStepUp(env,admin,payload);
       return json(await applyPlatformTransfer({ ...transferDeps,jobId:path.split('/')[4],confirmation:payload.confirmation }),200,env);
+    }
+    if (method === 'POST' && /^\/admin\/platform-transfers\/jobs\/[0-9a-f-]{36}\/media\/continue$/i.test(path)) {
+      return json(await continuePlatformTransferMedia({ ...transferDeps,jobId:path.split('/')[4] }),200,env);
+    }
+    if (method === 'POST' && /^\/admin\/platform-transfers\/jobs\/[0-9a-f-]{36}\/media\/retry$/i.test(path)) {
+      return json(await retryPlatformTransferMedia({ ...transferDeps,jobId:path.split('/')[4] }),200,env);
     }
     if (method === 'POST' && /^\/admin\/platform-transfers\/jobs\/[0-9a-f-]{36}\/rollback$/i.test(path)) {
       const payload = await readJson(request);
