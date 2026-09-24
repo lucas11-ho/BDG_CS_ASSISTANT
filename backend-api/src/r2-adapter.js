@@ -27,9 +27,14 @@ export function createR2Adapter(env, options = {}) {
   return {
     supportsHttpRange: true,
     async put(key, body, options = {}) {
-      const payload = await toNodeBody(body);
-      const contentLength = Number.isFinite(Number(options.contentLength))
-        ? Number(options.contentLength)
+      const declaredLength = Number(options.contentLength);
+      const canStream = Number.isFinite(declaredLength)
+        && (body instanceof ReadableStream || body instanceof Readable);
+      const payload = canStream
+        ? (body instanceof ReadableStream ? Readable.fromWeb(body) : body)
+        : await toNodeBody(body);
+      const contentLength = Number.isFinite(declaredLength)
+        ? declaredLength
         : typeof payload === 'string' ? Buffer.byteLength(payload) : Number(payload?.byteLength ?? payload?.length);
       await client.send(new PutObjectCommand({
         Bucket: env.R2_BUCKET_NAME,
