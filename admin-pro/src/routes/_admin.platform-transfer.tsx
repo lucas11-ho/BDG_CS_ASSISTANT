@@ -342,7 +342,7 @@ function PlatformTransferPage() {
         icon={<SafetyCertificateOutlined />}
         message={t("Secure platform-to-platform copy")}
         description={t(
-          "Data is copied from the old platform; the source is never changed. Transfer keys expire after 30 minutes, work once, and are never stored in readable form.",
+          "Data is copied from the old platform; the source is never changed. Transfer keys expire after 30 minutes and work once. Large Guide libraries use a resumable verified media queue instead of one oversized request.",
         )}
       />
       {user?.twofa_enabled !== true && (
@@ -502,15 +502,126 @@ function PlatformTransferPage() {
       )}
 
       {preview && (
-        <Card title={t("Required transfer preview")}>
+        <Card title={preview.job.status === "preview" ? t("Required transfer preview") : t("Transfer progress")}>
           {preview.job.status === "completed" ? (
-            <Result
-              status="success"
-              title={t("Platform data copied successfully")}
-              subTitle={t(
-                "Imported Guides, FAQs, and AI knowledge remain drafts until reviewed and published.",
+            <>
+              <Result
+                status="success"
+                title={t("Platform data copied successfully")}
+                subTitle={t(
+                  "Imported Guides, FAQs, and AI knowledge remain drafts until reviewed and published.",
+                )}
+              />
+              {Number(preview.job.media_progress?.total_files || 0) > 0 && (
+                <Card size="small" title={t("Guide media")} style={{ marginTop: 8 }}>
+                  <Progress percent={100} status="success" />
+                  <Space wrap>
+                    <Tag color="green">
+                      {t("Verified")} {preview.job.media_progress?.completed_files || 0}/{preview.job.media_progress?.total_files || 0}
+                    </Tag>
+                    <Typography.Text type="secondary">
+                      {formatBytes(preview.job.media_progress?.completed_bytes)}
+                    </Typography.Text>
+                  </Space>
+                </Card>
               )}
-            />
+            </>
+          ) : preview.job.status === "running" && preview.job.data_imported_at ? (
+            <>
+              <Alert
+                type="info"
+                showIcon
+                message={t("Database records imported; Guide media is copying")}
+                description={t(
+                  "The imported records are already saved as drafts. Media is copied and verified in resumable batches, so refreshing this page does not restart the transfer.",
+                )}
+                style={{ marginBottom: 16 }}
+              />
+              <Card size="small" title={t("Copying Guide media")}>
+                <Progress
+                  percent={Number(preview.job.media_progress?.percent || 0)}
+                  status="active"
+                />
+                <Row gutter={[12, 12]}>
+                  <Col xs={12} md={6}>
+                    <Statistic
+                      title={t("Verified files")}
+                      value={preview.job.media_progress?.completed_files || 0}
+                      suffix={"/" + String(preview.job.media_progress?.total_files || 0)}
+                    />
+                  </Col>
+                  <Col xs={12} md={6}>
+                    <Statistic title={t("Failed")} value={preview.job.media_progress?.failed_files || 0} />
+                  </Col>
+                  <Col xs={12} md={6}>
+                    <Statistic title={t("Pending")} value={preview.job.media_progress?.pending_files || 0} />
+                  </Col>
+                  <Col xs={12} md={6}>
+                    <Statistic
+                      title={t("Verified media")}
+                      value={formatBytes(preview.job.media_progress?.completed_bytes)}
+                    />
+                  </Col>
+                </Row>
+                <Space wrap style={{ marginTop: 12 }}>
+                  <Button
+                    type="primary"
+                    icon={<ReloadOutlined />}
+                    loading={pumpingJobId === preview.job.id}
+                    onClick={() => void pumpMedia(preview.job.id)}
+                  >
+                    {pumpingJobId === preview.job.id ? t("Copying media…") : t("Resume media copy")}
+                  </Button>
+                  <Typography.Text type="secondary">
+                    {t("You can leave this page and resume later from Transfer history.")}
+                  </Typography.Text>
+                </Space>
+              </Card>
+            </>
+          ) : preview.job.status === "failed" && preview.job.data_imported_at ? (
+            <>
+              <Result
+                status="warning"
+                title={t("Platform data imported, but some media still needs attention")}
+                subTitle={preview.job.error_message || t("Retry the failed media files. Successfully verified files will not be copied again.")}
+              />
+              <Card size="small" title={t("Guide media")}>
+                <Progress
+                  percent={Number(preview.job.media_progress?.percent || 0)}
+                  status="exception"
+                />
+                <Space wrap>
+                  <Tag color="green">
+                    {t("Verified")} {preview.job.media_progress?.completed_files || 0}/{preview.job.media_progress?.total_files || 0}
+                  </Tag>
+                  <Tag color="red">
+                    {t("Failed")} {preview.job.media_progress?.failed_files || 0}
+                  </Tag>
+                  <Typography.Text type="secondary">
+                    {formatBytes(preview.job.media_progress?.completed_bytes)}
+                  </Typography.Text>
+                </Space>
+                <Space wrap style={{ marginTop: 12 }}>
+                  <Button
+                    type="primary"
+                    icon={<ReloadOutlined />}
+                    loading={pumpingJobId === preview.job.id}
+                    onClick={() => void retryMedia(preview.job.id)}
+                  >
+                    {t("Retry failed media")}
+                  </Button>
+                  {preview.job.rollback_available && (
+                    <Button
+                      danger
+                      icon={<RollbackOutlined />}
+                      onClick={() => setRollbackJob(preview.job)}
+                    >
+                      {t("Rollback")}
+                    </Button>
+                  )}
+                </Space>
+              </Card>
+            </>
           ) : (
             <>
               <Descriptions bordered size="small" column={{ xs: 1, md: 2 }}>
@@ -572,7 +683,7 @@ function PlatformTransferPage() {
                 style={{ marginTop: 16 }}
                 message={t("Final security confirmation")}
                 description={t(
-                  "Review the counts carefully. Applying the transfer copies media and writes the selected configuration in one database transaction.",
+                  "Applying the transfer first imports the selected records as drafts, then copies and verifies owned media in resumable batches. The source platform is never changed.",
                 )}
               />
               <Divider />
@@ -709,41 +820,108 @@ function PlatformTransferPage() {
             },
             {
               title: t("Result"),
-              render: (_, row: TransferJob) =>
-                row.result?.created == null
-                  ? "—"
-                  : `${t("Created")} ${row.result.created} · ${t("Skipped")} ${row.result.skipped} · ${t("Replaced")} ${row.result.replaced}`,
+              render: (_, row: TransferJob) => {
+                if (row.result?.created == null) return "—";
+                const progress = row.media_progress;
+                return (
+                  <Space direction="vertical" size={2}>
+                    <span>{t("Created")} {row.result.created} · {t("Skipped")} {row.result.skipped} · {t("Replaced")} {row.result.replaced}</span>
+                    {Number(progress?.total_files || 0) > 0 && (
+                      <Typography.Text type="secondary">
+                        {t("Media")} {progress?.completed_files || 0}/{progress?.total_files || 0} · {Number(progress?.percent || 0)}%
+                      </Typography.Text>
+                    )}
+                  </Space>
+                );
+              },
             },
             {
               title: t("Actions"),
-              render: (_, row: TransferJob) =>
-                row.status === "preview" ? (
-                  <Button
-                    size="small"
-                    onClick={() =>
-                      setPreview({
-                        job: row,
-                        source: {
-                          platform_name:
-                            row.source_platform_name || `Platform ${row.source_platform_id}`,
-                        },
-                      })
-                    }
-                  >
-                    {t("Open preview")}
-                  </Button>
-                ) : row.rollback_available ? (
-                  <Button
-                    danger
-                    size="small"
-                    icon={<RollbackOutlined />}
-                    onClick={() => setRollbackJob(row)}
-                  >
-                    {t("Rollback")}
-                  </Button>
-                ) : (
-                  "—"
-                ),
+              render: (_, row: TransferJob) => (
+                <Space wrap>
+                  {row.status === "preview" && (
+                    <Button
+                      size="small"
+                      onClick={() =>
+                        setPreview({
+                          job: row,
+                          source: {
+                            platform_name:
+                              row.source_platform_name || `Platform ${row.source_platform_id}`,
+                          },
+                        })
+                      }
+                    >
+                      {t("Open preview")}
+                    </Button>
+                  )}
+                  {row.status === "running" && (
+                    <>
+                      <Button
+                        size="small"
+                        onClick={() =>
+                          setPreview({
+                            job: row,
+                            source: {
+                              platform_name:
+                                row.source_platform_name || `Platform ${row.source_platform_id}`,
+                            },
+                          })
+                        }
+                      >
+                        {t("Open progress")}
+                      </Button>
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<ReloadOutlined />}
+                        loading={pumpingJobId === row.id}
+                        onClick={() => void pumpMedia(row.id)}
+                      >
+                        {t("Resume media copy")}
+                      </Button>
+                    </>
+                  )}
+                  {row.status === "failed" && row.data_imported_at && (
+                    <>
+                      <Button
+                        size="small"
+                        onClick={() =>
+                          setPreview({
+                            job: row,
+                            source: {
+                              platform_name:
+                                row.source_platform_name || `Platform ${row.source_platform_id}`,
+                            },
+                          })
+                        }
+                      >
+                        {t("Open progress")}
+                      </Button>
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<ReloadOutlined />}
+                        loading={pumpingJobId === row.id}
+                        onClick={() => void retryMedia(row.id)}
+                      >
+                        {t("Retry failed media")}
+                      </Button>
+                    </>
+                  )}
+                  {row.rollback_available && row.status !== "running" && (
+                    <Button
+                      danger
+                      size="small"
+                      icon={<RollbackOutlined />}
+                      onClick={() => setRollbackJob(row)}
+                    >
+                      {t("Rollback")}
+                    </Button>
+                  )}
+                  {!["preview","running","failed"].includes(row.status) && !row.rollback_available && "—"}
+                </Space>
+              ),
             },
           ]}
         />
