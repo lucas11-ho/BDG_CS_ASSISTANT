@@ -27,6 +27,7 @@ const checks = [
   ['retryable media is not reported as a terminal failure', transfer.includes("status='failed' AND attempts >= $2")],
   ['queue work uses database row locking', transfer.includes('FOR UPDATE SKIP LOCKED')],
   ['stale in-progress media becomes retryable', transfer.includes("status='copying'") && transfer.includes("INTERVAL '5 minutes'")],
+  ['progress counts only exhausted failures as permanently failed', transfer.includes("status='failed' AND attempts >= $2") && transfer.includes("status='failed' AND attempts < $2")],
   ['source media discovery includes raw owned R2 keys and upload URLs', transfer.includes('if (item.startsWith(prefix)) keys.add(item)') && transfer.includes('/\\/uploads\\/')],
   ['external media remains outside owned-prefix transfer', transfer.includes('if (key.startsWith(prefix)) keys.add(key)')],
   ['apply imports database data before processing batches', transfer.indexOf('const imported = await importManifest') < transfer.indexOf('return processPlatformTransferMediaBatch')],
