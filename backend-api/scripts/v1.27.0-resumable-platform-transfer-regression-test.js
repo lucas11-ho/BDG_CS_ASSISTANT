@@ -24,6 +24,7 @@ const checks = [
   ['manifest ceiling is expanded to 32 MiB', transfer.includes('const MAX_MANIFEST_BYTES = 32 * 1024 * 1024')],
   ['media copy is bounded to 25 files and 12 seconds per request', transfer.includes('const MEDIA_BATCH_SIZE = 25') && transfer.includes('const MEDIA_BATCH_BUDGET_MS = 12_000')],
   ['individual media retry budget is bounded', transfer.includes('const MAX_MEDIA_ATTEMPTS = 5')],
+  ['retryable media is not reported as a terminal failure', transfer.includes("status='failed' AND attempts >= $2")],
   ['queue work uses database row locking', transfer.includes('FOR UPDATE SKIP LOCKED')],
   ['stale in-progress media becomes retryable', transfer.includes("status='copying'") && transfer.includes("INTERVAL '5 minutes'")],
   ['source media discovery includes raw owned R2 keys and upload URLs', transfer.includes('if (item.startsWith(prefix)) keys.add(item)') && transfer.includes('/\\/uploads\\/')],
@@ -46,6 +47,7 @@ const checks = [
   ['runtime advertises resumable transfer features', server.includes("'resumable-platform-transfer-media'") && server.includes("'verified-transfer-media-queue'")],
   ['normal CI runs v1.27 transfer regression', ci.includes('npm run test:v1270-transfer')],
   ['production release runs v1.27 transfer regression', production.includes('npm --prefix backend-api run test:v1270-transfer')],
+  ['integration suite forces a multi-batch 30-file transfer', read('backend-api','scripts','integration-test.js').includes("completed_files),25") && read('backend-api','scripts','integration-test.js').includes("completed_files),30")],
 ];
 
 for (const [name, ok] of checks) {
