@@ -843,12 +843,12 @@ export async function rollbackPlatformTransfer({ env, query, withTransaction, sc
   if (String(confirmation || '').trim() !== 'ROLLBACK') fail('Type ROLLBACK to confirm', 400, 'TRANSFER_ROLLBACK_CONFIRMATION_REQUIRED');
   const job = (await query(`SELECT * FROM platform_transfer_jobs WHERE public_id=$1::uuid AND target_platform_id=$2 LIMIT 1`, [jobId,scope.platform_id])).rows[0];
   if (!job) fail('Transfer job was not found', 404, 'TRANSFER_JOB_NOT_FOUND');
-  if (job.status !== 'completed') fail('Only a completed transfer can be rolled back', 409, 'TRANSFER_ROLLBACK_UNAVAILABLE');
+  if (!['completed','failed'].includes(String(job.status))) fail('Only a completed or media-failed transfer can be rolled back', 409, 'TRANSFER_ROLLBACK_UNAVAILABLE');
   if (!job.rollback_expires_at || new Date(job.rollback_expires_at).getTime() <= Date.now()) fail('The seven-day rollback window has expired', 410, 'TRANSFER_ROLLBACK_EXPIRED');
   const rollback = job.rollback_json || {};
   const finished = await withTransaction(async (tx) => {
     const locked = (await tx(`SELECT status FROM platform_transfer_jobs WHERE id=$1 FOR UPDATE`, [job.id])).rows[0];
-    if (locked?.status !== 'completed') fail('Transfer was already rolled back', 409, 'TRANSFER_ROLLBACK_UNAVAILABLE');
+    if (!['completed','failed'].includes(String(locked?.status))) fail('Transfer was already rolled back or is still running', 409, 'TRANSFER_ROLLBACK_UNAVAILABLE');
     for (const table of ROLLBACK_ORDER) {
       const ids = rollback.inserted?.[table] || [];
       if (ids.length) await tx(`DELETE FROM ${table} WHERE tenant_id=$1 AND platform_id=$2 AND id=ANY($3::bigint[])`, [scope.tenant_id,scope.platform_id,ids]);
@@ -856,7 +856,10 @@ export async function rollbackPlatformTransfer({ env, query, withTransaction, sc
     }
     return (await tx(`UPDATE platform_transfer_jobs SET status='rolled_back',rolled_back_by=$1,rolled_back_at=NOW(),updated_at=NOW() WHERE id=$2 RETURNING *`, [admin.email,job.id])).rows[0];
   });
-  if (env.GUIDE_IMAGES?.delete) await Promise.allSettled((rollback.copied_media || []).map((key) => env.GUIDE_IMAGES.delete(key)));
+  const queuedMedia = (await query(`SELECT target_key FROM platform_transfer_media_items
+    WHERE job_id=$1 AND status='completed'`, [job.id])).rows.map((row) => row.target_key);
+  const copiedMedia = [...new Set([...(rollback.copied_media || []),...queuedMedia].filter(Boolean))];
+  if (env.GUIDE_IMAGES?.delete) await Promise.allSettled(copiedMedia.map((key) => env.GUIDE_IMAGES.delete(key)));
   await audit('rollback','platform_transfer_jobs',jobId,'Platform transfer rolled back within the seven-day recovery window',scope);
   return { ok:true, job:publicJob(finished) };
 }
