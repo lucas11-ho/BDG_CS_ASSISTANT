@@ -3,9 +3,12 @@ import { sanitizeRichHtml } from './rich-html.js';
 const TRANSFER_VERSION = 1;
 const GRANT_TTL_MINUTES = 30;
 const ROLLBACK_DAYS = 7;
-const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
-const MAX_MEDIA_FILES = 250;
-const MAX_MEDIA_BYTES = 250 * 1024 * 1024;
+const MAX_MANIFEST_BYTES = 32 * 1024 * 1024;
+const MAX_MEDIA_FILES = 10_000;
+const MAX_MEDIA_BYTES = 20 * 1024 * 1024 * 1024;
+const MEDIA_BATCH_SIZE = 25;
+const MEDIA_BATCH_BUDGET_MS = 12_000;
+const MAX_MEDIA_ATTEMPTS = 5;
 const HTML_COLUMNS = new Set(['answer_html','body_html','body_html_hi','rich_html','rich_html_hi','qa_answer_html']);
 
 export const PLATFORM_TRANSFER_PERMISSIONS = Object.freeze([
@@ -158,6 +161,13 @@ function safeHashEqual(left, right) {
 
 function publicJob(value) {
   if (!value) return null;
+  const totalFiles = Number(value.media_total_files || 0);
+  const completedFiles = Number(value.media_completed_files || 0);
+  const failedFiles = Number(value.media_failed_files || 0);
+  const pendingFiles = Math.max(0, totalFiles - completedFiles - failedFiles);
+  const totalBytes = Number(value.media_total_bytes || 0);
+  const completedBytes = Number(value.media_completed_bytes || 0);
+  const percent = totalFiles > 0 ? Math.max(0, Math.min(100, Math.round((completedFiles / totalFiles) * 100))) : 100;
   return {
     id:value.public_id,
     status:value.status,
@@ -168,7 +178,21 @@ function publicJob(value) {
     conflict_policy:value.conflict_policy,
     preview:value.preview_json || {},
     result:value.result_json || {},
-    rollback_available:value.status === 'completed' && value.rollback_expires_at && new Date(value.rollback_expires_at).getTime() > Date.now(),
+    media_progress:{
+      total_files:totalFiles,
+      completed_files:completedFiles,
+      failed_files:failedFiles,
+      pending_files:pendingFiles,
+      total_bytes:totalBytes,
+      completed_bytes:completedBytes,
+      percent,
+      batch_size:Number(value.media_batch_size || MEDIA_BATCH_SIZE),
+      last_progress_at:value.media_last_progress_at ? String(value.media_last_progress_at) : '',
+    },
+    data_imported_at:value.data_imported_at ? String(value.data_imported_at) : '',
+    rollback_available:['completed','failed'].includes(String(value.status || ''))
+      && value.rollback_expires_at
+      && new Date(value.rollback_expires_at).getTime() > Date.now(),
     rollback_expires_at:value.rollback_expires_at ? String(value.rollback_expires_at) : '',
     created_by:value.created_by,
     applied_by:value.applied_by || '',
@@ -176,6 +200,7 @@ function publicJob(value) {
     completed_at:value.completed_at ? String(value.completed_at) : '',
     rolled_back_at:value.rolled_back_at ? String(value.rolled_back_at) : '',
     error_code:value.error_code || '',
+    error_message:value.error_message || '',
   };
 }
 
@@ -250,7 +275,7 @@ export async function listPlatformTransfers({ query, scope }) {
     JOIN saas_platforms source ON source.id=j.source_platform_id
     JOIN saas_platforms target ON target.id=j.target_platform_id
     WHERE j.target_platform_id=$1 OR j.source_platform_id=$1 ORDER BY j.created_at DESC LIMIT 50`, [scope.platform_id])).rows.map(publicJob);
-  return { ok:true, platform:{ id:Number(scope.platform_id),name:scope.platform_name || '' }, modules:[...PLATFORM_TRANSFER_MODULES], grants, jobs, policy:{ grant_ttl_minutes:GRANT_TTL_MINUTES, rollback_days:ROLLBACK_DAYS, conflict_policy:'skip_existing', imported_content_status:'draft' } };
+  return { ok:true, platform:{ id:Number(scope.platform_id),name:scope.platform_name || '' }, modules:[...PLATFORM_TRANSFER_MODULES], grants, jobs, policy:{ grant_ttl_minutes:GRANT_TTL_MINUTES, rollback_days:ROLLBACK_DAYS, conflict_policy:'skip_existing', imported_content_status:'draft', max_manifest_bytes:MAX_MANIFEST_BYTES, max_media_files:MAX_MEDIA_FILES, max_media_bytes:MAX_MEDIA_BYTES, media_batch_size:MEDIA_BATCH_SIZE, media_max_attempts:MAX_MEDIA_ATTEMPTS } };
 }
 
 export async function revokePlatformTransferGrant({ query, scope, admin, grantId, audit }) {
